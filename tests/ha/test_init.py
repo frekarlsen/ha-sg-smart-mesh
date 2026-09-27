@@ -41,7 +41,7 @@ def test_manifest_keys_sorted_per_hassfest() -> None:
 def test_manifest_core_fields() -> None:
     manifest = _load_manifest()
     assert manifest["domain"] == "bluetooth_mesh"
-    assert manifest["name"] == "Bluetooth Mesh"
+    assert manifest["name"] == "SG Smart 3.0 (Bluetooth Mesh)"
     assert manifest["config_flow"] is True
     assert "bluetooth" in manifest["dependencies"]
 
@@ -84,7 +84,7 @@ def test_hacs_json_has_no_domains_key() -> None:
         "filename",
     }
     assert set(hacs).issubset(allowed), f"unexpected hacs.json keys: {set(hacs)}"
-    assert hacs["name"] == "Bluetooth Mesh"
+    assert hacs["name"] == "SG Smart 3.0 (Bluetooth Mesh)"
 
 
 def test_hacs_declares_a_minimum_core_version() -> None:

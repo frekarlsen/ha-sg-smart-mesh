@@ -6,6 +6,43 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-09-27
+
+First release of the **SG Smart 3.0** fork (frekarlsen/ha-sg-smart-mesh).
+
+### Added
+
+- **SG Smart 3.0 dimmers** (LEDDim Smart Pill 3.0): a light with brightness
+  through SG's vendor protocol, status read back from the dimmer, including
+  changes made with a wheel or at the wall.
+- **Minimum level** per dimmer, as a slider on the device page and the
+  `set_min_level` action: HA's 1–100 % is spread over the range the load
+  actually lights in. Adjusting it is live.
+- **Dimmer wheels / switches**: an event entity (`press`, `hold`,
+  `rotate_up`, `rotate_down` with `steps`) and a battery voltage sensor.
+  A switch is recognised on its first button event.
+- **Direct pairing** of a wheel to a dimmer (the dimmer stores it), from the
+  Configure menu or the `pair_switch` / `unpair_switch` actions.
+- **Device management in the Configure menu**: add a device (PB-GATT
+  provisioning through the Bluetooth proxy, then key, bindings and
+  publication), remove a device (factory reset over the mesh, unpairing a
+  wheel from every dimmer first, retiring its address), and back up the
+  network to `/config`.
+- Actions for finishing or investigating a node: `configure_node`,
+  `get_composition`, `send_raw`; every decrypted message is also fired as a
+  `bluetooth_mesh_message` event.
+- Protocol notes: `docs/sg-smart-3-protocol.md`.
+
+### Fixed
+
+- **Proxy configuration used the wrong nonce.** Proxy filter PDUs were sealed
+  with the network nonce instead of the proxy nonce (Mesh Profile §3.8.5.4).
+  Häfele lamps tolerated it; SG nodes drop it, keep an empty filter and
+  forward nothing back, so no status ever arrived.
+- A Mesh Configuration Database export's provisioner (e.g. the nRF Mesh phone)
+  no longer shows up as a phantom light, a node without composition is kept
+  rather than skipped, and a node's plain `name` field is used.
+
 ## [0.10.3] — 2026-09-24
 
 Five robustness fixes from the second full read of the integration. None of

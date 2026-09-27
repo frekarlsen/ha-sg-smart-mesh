@@ -1,21 +1,112 @@
-# Bluetooth Mesh — Home Assistant integration and Python stack
+# SG Smart 3.0 for Home Assistant — Bluetooth Mesh, no gateway
 
-[![Release](https://img.shields.io/github/v/release/dasimon135/ha-bluetooth-mesh)](https://github.com/dasimon135/ha-bluetooth-mesh/releases)
-[![Tests](https://github.com/dasimon135/ha-bluetooth-mesh/actions/workflows/tests.yml/badge.svg)](https://github.com/dasimon135/ha-bluetooth-mesh/actions/workflows/tests.yml)
-[![Validate](https://github.com/dasimon135/ha-bluetooth-mesh/actions/workflows/validate.yml/badge.svg)](https://github.com/dasimon135/ha-bluetooth-mesh/actions/workflows/validate.yml)
+[![Release](https://img.shields.io/github/v/release/frekarlsen/ha-sg-smart-mesh)](https://github.com/frekarlsen/ha-sg-smart-mesh/releases)
+[![Tests](https://github.com/frekarlsen/ha-sg-smart-mesh/actions/workflows/tests.yml/badge.svg)](https://github.com/frekarlsen/ha-sg-smart-mesh/actions/workflows/tests.yml)
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![License](https://img.shields.io/github/license/dasimon135/ha-bluetooth-mesh)](LICENSE)
+[![License](https://img.shields.io/github/license/frekarlsen/ha-sg-smart-mesh)](LICENSE)
 
-Control **Bluetooth Mesh lighting** from Home Assistant — Häfele Connect Mesh
-(Loox), other ThingOS luminaires, and standard SIG-Mesh lights — using the
-Bluetooth you already have. No vendor gateway, no extra box.
+Run **SG Armaturen "SG Smart 3.0"** lighting — LEDDim Smart Pill 3.0 dimmers,
+SG Smart Wireless 3.0 dimmer wheels — straight from Home Assistant, over the
+Bluetooth you already have. No SG gateway, no SG app, no nRF Mesh.
 
-These are the lights that came with an app and nothing else. Home Assistant has
-no Bluetooth Mesh support of its own, so until now the choices were a vendor
-gateway (Häfele's has been discontinued) or an experimental BlueZ setup that
-will not run on Home Assistant OS. This removes both.
+This is a fork of [dasimon135/ha-bluetooth-mesh](https://github.com/dasimon135/ha-bluetooth-mesh),
+the pure-Python Bluetooth SIG Mesh stack and Home Assistant integration built
+for Häfele Connect Mesh. Everything it does still works; this fork adds SG
+Smart 3.0's vendor protocol and everything needed to set up and manage the
+devices from Home Assistant alone.
 
-## Will this work for me?
+> **Unofficial.** Not affiliated with or endorsed by SG Armaturen AS. The SG
+> vendor protocol was worked out for interoperability; no SG code is included.
+
+## SG Smart 3.0: what you get
+
+| | |
+| --- | --- |
+| **Dimmers** (Smart Pill 3.0) | A `light` with on/off and brightness, status read back from the dimmer — a change made at the wall or with a wheel shows up in HA. |
+| **Minimum level** | A slider on each dimmer's page. Many LED loads stay dark in the bottom of a phase dimmer's range; set the level where the lamp starts to glow and HA's 1–100 % is spread over what actually lights. |
+| **Dimmer wheels / switches** | An `event` entity (`press`, `hold`, `rotate_up`, `rotate_down` with `steps`) for automations, and a **battery voltage** sensor. |
+| **Direct pairing** | A wheel paired to a dimmer drives it **directly** over the mesh — no gateway, and no Home Assistant in the loop, so it keeps working if HA is down. HA still sees both sides. |
+| **Device management** | Add (provision), pair / unpair, remove (factory reset over the mesh) and back up — all from the integration's **Configure** menu. |
+
+### What you need
+
+- Home Assistant 2025.8 or newer.
+- An **ESPHome Bluetooth proxy** (an ESP32 is enough) or a Bluetooth adapter
+  Home Assistant can use, in range of at least one mains-powered SG device.
+- SG Smart **3.0** devices. The older CSRmesh-based SG Smart generation is a
+  different radio protocol and is not supported (yet).
+
+### Installation
+
+1. HACS → Integrations → ⋮ → **Custom repositories** → add
+   `https://github.com/frekarlsen/ha-sg-smart-mesh`, category *Integration*.
+   Install **SG Smart 3.0 (Bluetooth Mesh)** and restart Home Assistant.
+2. Add the integration (Settings → Devices & services → Add integration →
+   *Bluetooth Mesh*) and paste a mesh network export (Mesh Configuration
+   Database JSON, e.g. exported from nRF Mesh). It holds your network keys:
+   keep it private.
+3. From then on, everything is in **Settings → Devices & services →
+   Bluetooth Mesh → Configure**.
+
+> The integration domain is still `bluetooth_mesh`, so this fork replaces the
+> upstream integration rather than running next to it. Install one or the other.
+
+### The Configure menu
+
+- **Add a device** — lists factory-reset devices Home Assistant can hear, most
+  recently heard first. Pick one, name it, and keep pressing the device while
+  it is set up (the wheel, or the dimmer's power / R button). HA provisions it,
+  gives it the application key, binds its models and points its publication
+  where it belongs: a dimmer reports to HA, a wheel publishes to all nodes so
+  paired dimmers can act on it. A battery device only announces itself for a
+  moment after it is woken — wake it, then choose *Search again*.
+- **Pair a wheel / switch to a dimmer** — pick both by name and what a short
+  press, a turn and a hold should do. The dimmer stores the pairing. One wheel
+  can drive several dimmers: pair it with each.
+- **Remove a device** — factory resets the device over the mesh (Config Node
+  Reset, like removing it in the SG app), unpairs a wheel from every dimmer
+  first, and removes it from HA. Its address is never reused, because the other
+  nodes remember its sequence numbers and would drop a newcomer as a replay.
+- **Back up the network** — writes the network (keys, nodes, device keys) to
+  `/config/bluetooth_mesh_backup_<name>.json`. **Keep a copy elsewhere**: without
+  it, every device has to be factory reset if this Home Assistant is lost. It
+  can be imported again with *Reconfigure*.
+- **Connection settings** — the upstream keep-alive / source address options.
+
+### Actions (for automations and scripts)
+
+`bluetooth_mesh.pair_switch`, `unpair_switch`, `set_min_level`, plus
+`configure_node`, `get_composition` and `send_raw` for finishing a half-added
+device or reverse-engineering further.
+
+### Known limits
+
+- The dimmer ignores SG's own trim (min/max level) command, so the minimum level
+  is applied by Home Assistant. A wheel still dims the dimmer over its whole
+  range; below the minimum HA shows 1 %.
+- Tested on a LEDDim Smart Pill 3.0 (product `0x00A2`) and SG Smart Wireless 3.0
+  dimmer wheels. Other SG Smart 3.0 devices (tunable white, RGBW, DIN, drivers)
+  speak the same vendor protocol but have not been tried — reports welcome.
+- Scenes stored in SG devices are not exposed; use Home Assistant scenes.
+
+### How it works
+
+SG Smart 3.0 devices are standard Bluetooth SIG Mesh nodes (Telink stack,
+company ID `0x0EE8`) that do almost everything through one vendor model. The
+protocol — power/level, status, switch pairing, button events, trim — is
+documented in [docs/sg-smart-3-protocol.md](docs/sg-smart-3-protocol.md).
+
+A notable fix on the way, which also applies upstream: proxy configuration
+messages (the proxy filter) must be encrypted with the **proxy nonce**
+(Mesh Profile §3.8.5.4), not the network nonce. Häfele lamps tolerate the
+wrong one; SG nodes silently reject it, and then forward nothing back.
+
+---
+
+*The rest of this README is the upstream documentation of the generic
+Bluetooth Mesh integration, which this fork keeps.*
+
+## Upstream: will this work for me?
 
 **Your lights.** Bluetooth Mesh luminaires: Häfele Connect Mesh and Loox,
 ThingOS-based lights sold under other names, and standard SIG-Mesh nodes. If
@@ -300,10 +391,10 @@ New versions are announced here first. A short note may follow in the forum
 thread, but this page is the only complete record. To hear about one:
 
 - **HACS already offers you the update**, release notes included — nothing to do;
-- subscribe to `https://github.com/dasimon135/ha-bluetooth-mesh/releases.atom` in
+- subscribe to `https://github.com/frekarlsen/ha-sg-smart-mesh/releases.atom` in
   any RSS reader, or inside Home Assistant through the `feedreader` integration;
 - or use **Watch → Custom → Releases** on this repository.
 
 ## License
 
-[MIT](LICENSE) © 2026 David Simon.
+[MIT](LICENSE) © 2026 David Simon (upstream), © 2026 Fredrik Karlsen (SG Smart 3.0 additions).
