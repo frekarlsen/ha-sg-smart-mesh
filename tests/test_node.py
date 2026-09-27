@@ -81,7 +81,10 @@ def test_proxy_config_pdu_round_trip():
     message = bytes([0x00, 0x00])  # Set Filter Type: accept list
 
     pdu = a.build_proxy_config_pdu(message)
-    decoded = network.decode(b.ctx, pdu)
+    # Proxy configuration is encrypted with the PROXY nonce (spec §3.8.5.4).
+    decoded = network.decode(b.ctx, pdu, proxy=True)
+    with pytest.raises(network.NetworkError):
+        network.decode(b.ctx, pdu)  # not decryptable as ordinary mesh traffic
 
     assert decoded.ctl is True
     assert decoded.ttl == 0

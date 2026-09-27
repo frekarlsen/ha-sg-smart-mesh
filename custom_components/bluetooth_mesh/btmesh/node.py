@@ -226,7 +226,7 @@ class MeshNode:
             raise NodeError("empty proxy configuration message")
         return network.encode(
             self._ctx, ctl=True, ttl=0, seq=self._ctx.next_seq(),
-            src=self._src, dst=0x0000, transport_pdu=message,
+            src=self._src, dst=0x0000, transport_pdu=message, proxy=True,
         )
 
     def parse_proxy_config_pdu(self, raw: bytes) -> bytes | None:
@@ -236,10 +236,15 @@ class MeshNode:
         one, so the destination is deliberately not checked.
         """
         try:
-            pdu = network.decode(self._ctx, raw)
-        except NetworkError as exc:
-            logger.debug("ignoring proxy config PDU: %s", exc)
-            return None
+            pdu = network.decode(self._ctx, raw, proxy=True)
+        except NetworkError:
+            # A proxy predating the fix may still answer under the network
+            # nonce; accept either rather than lose its Filter Status.
+            try:
+                pdu = network.decode(self._ctx, raw)
+            except NetworkError as exc:
+                logger.debug("ignoring proxy config PDU: %s", exc)
+                return None
         if not pdu.ctl:
             logger.debug("proxy config PDU is not a control message, ignoring")
             return None
@@ -263,6 +268,10 @@ class MeshNode:
             )
             return
         self._last_rx_seq[pdu.src] = pdu.seq
+        logger.debug(
+            "network PDU from %#06x to %#06x (ctl=%s, ttl=%d, seq=%#x)",
+            pdu.src, pdu.dst, pdu.ctl, pdu.ttl, pdu.seq,
+        )
         if pdu.ctl:
             self._handle_control(pdu)
         else:

@@ -89,6 +89,23 @@ def _network_nonce(ctl: bool, ttl: int, seq: int, src: int, iv_index: int) -> by
     )
 
 
+def _proxy_nonce(seq: int, src: int, iv_index: int) -> bytes:
+    """Proxy nonce (spec §3.8.5.4): 03 || 00 || SEQ || SRC || 0000 || IV Index.
+
+    Proxy configuration messages MUST use this one, not the network nonce. A
+    spec-conformant proxy (the Telink stack in SG Smart 3.0) fails the NetMIC
+    of a filter message built with the network nonce and drops it, leaving its
+    accept list empty so nothing — no Status reply — is forwarded back.
+    """
+    return (
+        bytes([0x03, 0x00])
+        + seq.to_bytes(3, "big")
+        + src.to_bytes(2, "big")
+        + b"\x00\x00"
+        + iv_index.to_bytes(4, "big")
+    )
+
+
 def _pecb(privacy_key: bytes, iv_index: int, privacy_random: bytes) -> bytes:
     """Obfuscation keystream (spec §3.8.7.3): e(PrivacyKey, 0^40 || IV Index || Privacy Random)."""
     plain = bytes(5) + iv_index.to_bytes(4, "big") + privacy_random
@@ -108,8 +125,13 @@ def encode(
     src: int,
     dst: int,
     transport_pdu: bytes,
+    proxy: bool = False,
 ) -> bytes:
-    """Build an on-air network PDU (spec §3.4.4, encrypted per §3.4.6.3)."""
+    """Build an on-air network PDU (spec §3.4.4, encrypted per §3.4.6.3).
+
+    ``proxy=True`` builds a proxy configuration PDU, encrypted with the proxy
+    nonce (§6.5, §3.8.5.4) instead of the network nonce.
+    """
     if not 0 <= ttl <= 0x7F:
         raise NetworkError(f"TTL out of range: {ttl}")
     if not 0 <= seq <= 0xFFFFFF:
@@ -123,7 +145,11 @@ def encode(
 
     ivi = ctx.iv_index & 1
     header = bytes([(ctl << 7) | ttl]) + seq.to_bytes(3, "big") + src.to_bytes(2, "big")
-    nonce = _network_nonce(ctl, ttl, seq, src, ctx.iv_index)
+    nonce = (
+        _proxy_nonce(seq, src, ctx.iv_index)
+        if proxy
+        else _network_nonce(ctl, ttl, seq, src, ctx.iv_index)
+    )
     mic_len = 8 if ctl else 4
     encrypted = ccm_encrypt(
         ctx.encryption_key, nonce, dst.to_bytes(2, "big") + transport_pdu, mic_len
@@ -132,7 +158,9 @@ def encode(
     return bytes([(ivi << 7) | ctx.nid]) + obfuscated + encrypted
 
 
-def decode(ctx: NetworkContext, raw: bytes) -> DecodedNetworkPDU:
+def decode(
+    ctx: NetworkContext, raw: bytes, *, proxy: bool = False
+) -> DecodedNetworkPDU:
     """Deobfuscate and decrypt an incoming network PDU (spec §3.4.6.4).
 
     Raises :class:`NetworkError` on NID/IVI mismatch, truncation, or bad NetMIC.
@@ -151,7 +179,11 @@ def decode(ctx: NetworkContext, raw: bytes) -> DecodedNetworkPDU:
     seq = int.from_bytes(header[1:4], "big")
     src = int.from_bytes(header[4:6], "big")
 
-    nonce = _network_nonce(ctl, ttl, seq, src, ctx.iv_index)
+    nonce = (
+        _proxy_nonce(seq, src, ctx.iv_index)
+        if proxy
+        else _network_nonce(ctl, ttl, seq, src, ctx.iv_index)
+    )
     mic_len = 8 if ctl else 4
     try:
         plaintext = ccm_decrypt(ctx.encryption_key, nonce, encrypted, mic_len)
