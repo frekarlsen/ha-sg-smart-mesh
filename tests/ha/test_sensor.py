@@ -51,6 +51,7 @@ class FakeCoordinator:
         self.available = available
         self.proxy_address = proxy_address
         self.listeners: list = []
+        self.sg_switches: list[int] = []
 
     def async_add_listener(self, callback_):
         self.listeners.append(callback_)
@@ -247,17 +248,44 @@ async def test_a_missing_device_is_survived(registry):
 # ------------------------------------------------------------------ the setup
 
 
-async def test_setup_creates_exactly_one_proxy_sensor():
+class _Entry:
+    entry_id = "entry1"
+
+    def __init__(self, coordinator):
+        self.runtime_data = coordinator
+        self.unloads: list = []
+
+    def async_on_unload(self, func):
+        self.unloads.append(func)
+
+
+async def test_setup_creates_exactly_one_proxy_sensor(hass):
     """One GATT link per config entry, so one entity -- however many nodes the
     network has."""
     coordinator = FakeCoordinator(_network(), proxy_address=ADDRESS)
-    entry = type("Entry", (), {"runtime_data": coordinator})()
     added: list = []
 
-    await async_setup_entry(object(), entry, lambda entities: added.extend(entities))
+    await async_setup_entry(
+        hass, _Entry(coordinator), lambda entities: added.extend(entities)
+    )
 
     assert len(added) == 1
     assert isinstance(added[0], MeshProxySensor)
+
+
+async def test_setup_adds_a_battery_sensor_per_known_sg_switch(hass):
+    from custom_components.bluetooth_mesh.sensor import SgSwitchBattery
+
+    coordinator = FakeCoordinator(_network(), proxy_address=ADDRESS)
+    coordinator.sg_switches = [0x0004, 0x0007]
+    added: list = []
+
+    await async_setup_entry(
+        hass, _Entry(coordinator), lambda entities: added.extend(entities)
+    )
+
+    batteries = [e for e in added if isinstance(e, SgSwitchBattery)]
+    assert [b.unique_id.rsplit("_", 3)[-3] for b in batteries] == ["0004", "0007"]
 
 
 def test_the_entity_name_is_translated_not_a_raw_key():

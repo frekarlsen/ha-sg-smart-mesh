@@ -36,6 +36,17 @@
   "options": {
     "step": {
       "init": {
+        "title": "Bluetooth Mesh",
+        "description": "Que voulez-vous faire ?",
+        "menu_options": {
+          "add_device": "Ajouter un appareil",
+          "pair_switch": "Associer une molette / un interrupteur",
+          "remove_device": "Supprimer un appareil",
+          "backup": "Sauvegarder le réseau",
+          "settings": "Paramètres de connexion"
+        }
+      },
+      "settings": {
         "title": "Options Bluetooth Mesh",
         "description": "Une lampe mesh n'offre qu'un seul emplacement de connexion proxy Bluetooth. Le garder ouvert rend les commandes instantanées, mais empêche l'application Häfele Connect Mesh de se connecter à la lampe tant que cette intégration est chargée.",
         "data": {
@@ -48,7 +59,67 @@
           "keepalive_seconds": "Durée de maintien de la connexion proxy après la dernière commande. 0 = toujours connecté (le plus réactif ; l'application Häfele ne peut pas utiliser la lampe). Une valeur positive rend la lampe à l'application après ce délai d'inactivité, au prix de quelques secondes de reconnexion à la commande suivante. Dans ce mode, Home Assistant ne sonde pas la lampe en arrière-plan, pour laisser le créneau libre : une lampe coupée au mur ou débranchée reste affichée comme disponible jusqu'à ce que la commande suivante échoue.",
           "src_addr": "L'adresse depuis laquelle Home Assistant émet. 0 la déduit automatiquement, ce qui convient presque toujours. Ne la fixez que si les commandes sont ignorées sans erreur : un export ne liste aucun provisionneur, donc si l'application du fabricant a pris la même adresse, chaque message est rejeté comme un rejeu sans que rien ne le signale."
         }
+      },
+      "add_device": {
+        "title": "Ajouter un appareil",
+        "description": "Appareils réinitialisés entendus par HA, les plus récents en premier. Un appareil sur pile ne s'annonce que brièvement après réveil ou réinitialisation : réveillez-le, choisissez « Search again » et validez. C'est l'entrée vue il y a quelques secondes. Pendant l'ajout, continuez à actionner l'appareil : la molette ou l'interrupteur, ou le bouton du variateur (power ou R).",
+        "data": {
+          "device": "Appareil",
+          "name": "Nom"
+        },
+        "data_description": {
+          "name": "Nom de l'appareil dans Home Assistant"
+        }
+      },
+      "add_device_run": {
+        "title": "Ajout de {name}"
+      },
+      "pair_switch": {
+        "title": "Associer une molette / un interrupteur",
+        "description": "Le variateur mémorise l'association et réagit directement à la molette, sans Home Assistant. Pour une molette et plusieurs variateurs, répétez l'opération pour chaque variateur.",
+        "data": {
+          "switch": "Molette / interrupteur",
+          "node": "Variateur",
+          "mode": "Action",
+          "press": "Appui court",
+          "rotate": "Rotation de la molette",
+          "hold": "Appui long"
+        }
+      },
+      "remove_device": {
+        "title": "Supprimer un appareil",
+        "description": "L'appareil est réinitialisé via le mesh (comme lors de sa suppression dans l'app SG) et retiré de Home Assistant. Une molette ou un interrupteur est d'abord désassocié de tous les variateurs. Un appareil sur pile s'endort : actionnez-le pendant la suppression.",
+        "data": {
+          "device": "Appareil",
+          "force": "Supprimer quand même si l'appareil ne répond pas"
+        }
+      },
+      "remove_device_run": {
+        "title": "Suppression de {name}"
       }
+    },
+    "progress": {
+      "adding": "Configuration de {name} : provisionnement puis configuration. Jusqu'à deux minutes. Continuez à actionner l'appareil : la molette ou l'interrupteur, ou le bouton du variateur (power ou R).",
+      "removing": "Réinitialisation de {name}. Pour un appareil sur pile, continuez à l'actionner. Jusqu'à une minute."
+    },
+    "error": {
+      "no_devices": "Aucun appareil en attente de configuration n'a été trouvé. Réinitialisez l'appareil, placez-le près d'un proxy Bluetooth, puis validez pour relancer la recherche.",
+      "send_failed": "La commande n'a pas pu être envoyée : le mesh est-il connecté ?"
+    },
+    "abort": {
+      "backup_written": "Le réseau (clés, nœuds et clés d'appareil) a été écrit dans {path}. Conservez-en une copie en lieu sûr : sans elle, tous les appareils devront être réinitialisés si ce Home Assistant est perdu. Elle peut être réimportée avec Reconfigurer.",
+      "device_added": "{name} a été ajouté à l'adresse {unicast}.",
+      "device_added_switch": "{name} a été ajouté à l'adresse {unicast}. Ses entités bouton et pile apparaissent dès sa première utilisation. Associez-le à un variateur avec l'action bluetooth_mesh.pair_switch.",
+      "device_added_unconfigured": "{name} a été provisionné à l'adresse {unicast} mais n'a pas répondu à la configuration ({error}). Ses clés sont enregistrées. Réveillez-le et lancez l'action bluetooth_mesh.configure_node pour {unicast}.",
+      "add_device_failed": "L'appareil n'a pas pu être ajouté : {error}. Il ne fait pas partie du réseau ; réinitialisez-le et réessayez.",
+      "not_loaded": "L'intégration doit être en marche (connectée au mesh) pour ajouter un appareil.",
+      "paired": "{switch} commande maintenant {node}. Essayez : cela fonctionne sans Home Assistant.",
+      "unpaired": "{switch} ne commande plus {node}.",
+      "nothing_to_pair": "Ajoutez d'abord au moins un variateur SG et une molette ou un interrupteur.",
+      "device_removed": "{name} a été réinitialisé et supprimé. Il peut être ajouté à nouveau, ici ou dans l'app SG.",
+      "device_forgotten": "{name} a été retiré de Home Assistant mais n'a pas confirmé la réinitialisation. Réinitialisez-le manuellement avant de le réutiliser.",
+      "remove_device_failed": "{name} n'a pas été supprimé : {error}.",
+      "nothing_to_remove": "Aucun appareil à supprimer."
     }
   },
   "issues": {
@@ -70,6 +141,163 @@
     "sensor": {
       "proxy_address": {
         "name": "Adresse du proxy"
+      },
+      "sg_battery_voltage": {
+        "name": "Tension de la pile"
+      }
+    },
+    "event": {
+      "sg_switch": {
+        "name": "Bouton",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "press": "Appui",
+              "hold": "Appui long",
+              "rotate_up": "Rotation vers le haut",
+              "rotate_down": "Rotation vers le bas",
+              "unknown": "Inconnu"
+            }
+          }
+        }
+      }
+    },
+    "number": {
+      "sg_min_level": {
+        "name": "Niveau minimum"
+      }
+    }
+  },
+  "services": {
+    "get_composition": {
+      "name": "Get composition",
+      "description": "Read a node's Composition Data (models). Keep a battery device awake while it runs.",
+      "fields": {
+        "unicast": {
+          "name": "Unicast address",
+          "description": "Node address, e.g. 0x0004"
+        },
+        "seconds": {
+          "name": "Seconds",
+          "description": "How long to keep retrying"
+        }
+      }
+    },
+    "configure_node": {
+      "name": "Configure node",
+      "description": "Add the AppKey, bind all models and point publication at Home Assistant. Keep a battery device awake while it runs.",
+      "fields": {
+        "unicast": {
+          "name": "Unicast address",
+          "description": "Node address, e.g. 0x0004"
+        },
+        "seconds": {
+          "name": "Seconds",
+          "description": "How long to keep retrying"
+        },
+        "publish_address": {
+          "name": "Publish address",
+          "description": "Where the node should publish (default 0xCEE8)"
+        }
+      }
+    },
+    "send_raw": {
+      "name": "Send raw message",
+      "description": "Send an access payload (opcode included, hex).",
+      "fields": {
+        "destination": {
+          "name": "Destination",
+          "description": "Address"
+        },
+        "payload": {
+          "name": "Payload",
+          "description": "Hex, opcode included"
+        },
+        "device_key": {
+          "name": "Device key",
+          "description": "Encrypt with the node's device key (Config messages)"
+        }
+      }
+    },
+    "pair_switch": {
+      "name": "Appairer un interrupteur",
+      "description": "Fait réagir un variateur directement à un interrupteur ou une molette. L'appairage est stocké dans le variateur et fonctionne sans Home Assistant.",
+      "fields": {
+        "node": {
+          "name": "Variateur / actionneur",
+          "description": "Adresse du nœud qui doit réagir, p. ex. 0x0003"
+        },
+        "switch": {
+          "name": "Interrupteur / molette",
+          "description": "Adresse de l'interrupteur ou de la molette, p. ex. 0x0004"
+        },
+        "button": {
+          "name": "Index du bouton",
+          "description": "4 pour la molette SG Smart 3.0"
+        },
+        "press": {
+          "name": "Appui",
+          "description": "Action d'un appui court"
+        },
+        "hold": {
+          "name": "Appui long",
+          "description": "Action d'un appui maintenu"
+        },
+        "rotate": {
+          "name": "Rotation",
+          "description": "Action de la rotation de la molette"
+        }
+      }
+    },
+    "unpair_switch": {
+      "name": "Désappairer un interrupteur",
+      "description": "Supprime l'appairage d'un bouton dans un variateur.",
+      "fields": {
+        "node": {
+          "name": "Variateur / actionneur",
+          "description": "Adresse du nœud qui doit réagir, p. ex. 0x0003"
+        },
+        "switch": {
+          "name": "Interrupteur / molette",
+          "description": "Adresse de l'interrupteur ou de la molette, p. ex. 0x0004"
+        },
+        "button": {
+          "name": "Index du bouton",
+          "description": "4 pour la molette SG Smart 3.0"
+        }
+      }
+    },
+    "set_min_level": {
+      "name": "Définir le niveau minimum",
+      "description": "Niveau le plus bas (%) auquel la charge d'un variateur SG s'allume encore. Les 1–100 % de Home Assistant sont répartis entre ce niveau et 100 %. 0 le supprime.",
+      "fields": {
+        "unicast": {
+          "name": "Adresse du variateur",
+          "description": "p. ex. 0x0003"
+        },
+        "min_level": {
+          "name": "Niveau minimum",
+          "description": "Niveau où la lampe commence à éclairer"
+        }
+      }
+    }
+  },
+  "selector": {
+    "switch_command": {
+      "options": {
+        "none": "Rien",
+        "toggle_on_off": "Basculer marche/arrêt",
+        "on": "Marche",
+        "off": "Arrêt",
+        "dim": "Varier haut/bas",
+        "dim_up": "Augmenter",
+        "dim_down": "Diminuer"
+      }
+    },
+    "pair_mode": {
+      "options": {
+        "pair": "Associer",
+        "unpair": "Supprimer l'association"
       }
     }
   }

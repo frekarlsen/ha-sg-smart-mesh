@@ -2172,3 +2172,42 @@ async def test_a_failed_move_keeps_the_legacy_cursor(hass) -> None:
         assert coord.seq == 700 + SEQ_SAFETY_MARGIN
         assert (await legacy.async_load())["seq"] == 700
     await coord.async_stop()
+
+
+# ------------------------------------------------------- SG switches / wheels
+
+
+async def test_first_sg_button_event_registers_the_switch_then_dedups(hass) -> None:
+    from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
+    from custom_components.bluetooth_mesh.btmesh.sg_smart import parse_sg_button_event
+    from custom_components.bluetooth_mesh.coordinator import SIGNAL_NEW_SG_SWITCH
+
+    entry = _make_entry(hass)
+    coord = MeshCoordinator(hass, entry)
+    announced: list = []
+    async_dispatcher_connect(
+        hass,
+        SIGNAL_NEW_SG_SWITCH.format(entry.entry_id),
+        lambda unicast, event: announced.append((unicast, event.action)),
+    )
+    seen: list = []
+
+    press = parse_sg_button_event(bytes.fromhex("2a0a0100041d04010100000000"))
+    coord._handle_sg_button_event(0x0004, press)
+    await hass.async_block_till_done()
+    assert announced == [(0x0004, 1)]
+    assert coord.sg_switches == [0x0004]
+
+    coord.async_add_sg_button_listener(0x0004, seen.append)
+    # Mesh retransmission of the same event (same TID): dropped.
+    coord._handle_sg_button_event(0x0004, press)
+    assert seen == []
+    # A turn: new TID, frames 1 and 2 (each sent twice) -> two new frames.
+    for frame in ("2a470100041d04050800000000", "2a470100041d04050800000000",
+                  "2a470200041d04050908000000", "2a470200041d04050908000000"):
+        coord._handle_sg_button_event(
+            0x0004, parse_sg_button_event(bytes.fromhex(frame))
+        )
+    assert [(e.action, e.value) for e in seen] == [(5, 8), (5, 9)]
+    assert len(announced) == 1

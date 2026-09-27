@@ -36,6 +36,17 @@
   "options": {
     "step": {
       "init": {
+        "title": "Bluetooth Mesh",
+        "description": "What do you want to do?",
+        "menu_options": {
+          "add_device": "Add a device",
+          "pair_switch": "Pair a wheel / switch to a dimmer",
+          "remove_device": "Remove a device",
+          "backup": "Back up the network",
+          "settings": "Connection settings"
+        }
+      },
+      "settings": {
         "title": "Bluetooth Mesh options",
         "description": "A mesh lamp offers a single Bluetooth proxy connection slot. Keeping it open makes commands instant, but prevents the Häfele Connect Mesh app from connecting to the lamp while this integration is loaded.",
         "data": {
@@ -48,7 +59,67 @@
           "keepalive_seconds": "How long to hold the proxy connection after the last command. 0 = always connected (most responsive; the Häfele app cannot use the lamp). A positive value hands the lamp back to the app after that idle time, at the cost of a few seconds to reconnect on the next command. In that mode Home Assistant does not probe the lamp in the background, so as to leave the slot free: a lamp that is switched off at the wall or unplugged keeps showing as available until the next command fails.",
           "src_addr": "The address Home Assistant sends from. 0 derives it automatically, which is almost always right. Set it only if commands are ignored with no error: an export lists no provisioner, so if the vendor app claimed the same address, every message is discarded as a replay and nothing anywhere says so."
         }
+      },
+      "add_device": {
+        "title": "Add a device",
+        "description": "Devices HA has heard that are factory reset and waiting to be set up, most recently heard first. A battery device (dimmer wheel, switch) only announces itself briefly after it is woken or reset: wake it, then choose \"Search again\" and Submit. It is the entry seen a few seconds ago. While a device is being added, keep pressing it: the wheel or switch, or the dimmer's button (power or R).",
+        "data": {
+          "device": "Device",
+          "name": "Name"
+        },
+        "data_description": {
+          "name": "What the device is called in Home Assistant"
+        }
+      },
+      "add_device_run": {
+        "title": "Adding {name}"
+      },
+      "pair_switch": {
+        "title": "Pair a wheel / switch",
+        "description": "The dimmer stores the pairing and reacts to the wheel directly, without Home Assistant. Pair one wheel to several dimmers by running this once per dimmer.",
+        "data": {
+          "switch": "Wheel / switch",
+          "node": "Dimmer",
+          "mode": "What to do",
+          "press": "Short press",
+          "rotate": "Turning the wheel",
+          "hold": "Hold"
+        }
+      },
+      "remove_device": {
+        "title": "Remove a device",
+        "description": "The device is factory reset over the mesh (as when removing it in the SG app) and removed from Home Assistant. A wheel or switch is unpaired from every dimmer first. A battery device sleeps: press or turn it while it is being removed.",
+        "data": {
+          "device": "Device",
+          "force": "Remove anyway if the device does not answer"
+        }
+      },
+      "remove_device_run": {
+        "title": "Removing {name}"
       }
+    },
+    "progress": {
+      "adding": "Setting up {name}: provisioning, then configuring. This takes up to two minutes. Keep pressing the device while it runs: the wheel or switch, or the dimmer's button (power or R).",
+      "removing": "Resetting {name}. For a battery device, keep pressing or turning it. This takes up to a minute."
+    },
+    "error": {
+      "no_devices": "No device waiting to be set up was found. Factory reset the device (SG: the reset procedure in its manual), make sure it is near a Bluetooth proxy, then press Submit to search again.",
+      "send_failed": "The command could not be sent: is the mesh connected?"
+    },
+    "abort": {
+      "backup_written": "The network (keys, nodes and device keys) was written to {path}. Keep a copy somewhere safe: without it every device must be factory reset if this Home Assistant is lost. It can be imported again with Reconfigure.",
+      "device_added": "{name} was added as {unicast}.",
+      "device_added_switch": "{name} was added as {unicast}. Its button and battery entities appear once it is used. Pair it to a dimmer with the bluetooth_mesh.pair_switch action.",
+      "device_added_unconfigured": "{name} was provisioned as {unicast} but did not answer the configuration ({error}). Its keys are saved. Wake it (press or turn it) and run the bluetooth_mesh.configure_node action for {unicast}.",
+      "add_device_failed": "The device could not be added: {error}. It is not part of the network; factory reset it and try again.",
+      "not_loaded": "The integration must be running (connected to the mesh) to add a device.",
+      "paired": "{switch} now controls {node}. Try it: it works without Home Assistant.",
+      "unpaired": "{switch} no longer controls {node}.",
+      "nothing_to_pair": "Add at least one SG dimmer and one wheel or switch first.",
+      "device_removed": "{name} was factory reset and removed. It can be added again, here or in the SG app.",
+      "device_forgotten": "{name} was removed from Home Assistant, but did not confirm the reset. Factory reset it by hand before using it again.",
+      "remove_device_failed": "{name} was not removed: {error}.",
+      "nothing_to_remove": "There is no device to remove."
     }
   },
   "issues": {
@@ -70,6 +141,163 @@
     "sensor": {
       "proxy_address": {
         "name": "Proxy address"
+      },
+      "sg_battery_voltage": {
+        "name": "Battery voltage"
+      }
+    },
+    "event": {
+      "sg_switch": {
+        "name": "Button",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "press": "Press",
+              "hold": "Hold",
+              "rotate_up": "Rotate up",
+              "rotate_down": "Rotate down",
+              "unknown": "Unknown"
+            }
+          }
+        }
+      }
+    },
+    "number": {
+      "sg_min_level": {
+        "name": "Minimum level"
+      }
+    }
+  },
+  "services": {
+    "get_composition": {
+      "name": "Get composition",
+      "description": "Read a node's Composition Data (models). Keep a battery device awake while it runs.",
+      "fields": {
+        "unicast": {
+          "name": "Unicast address",
+          "description": "Node address, e.g. 0x0004"
+        },
+        "seconds": {
+          "name": "Seconds",
+          "description": "How long to keep retrying"
+        }
+      }
+    },
+    "configure_node": {
+      "name": "Configure node",
+      "description": "Add the AppKey, bind all models and point publication at Home Assistant. Keep a battery device awake while it runs.",
+      "fields": {
+        "unicast": {
+          "name": "Unicast address",
+          "description": "Node address, e.g. 0x0004"
+        },
+        "seconds": {
+          "name": "Seconds",
+          "description": "How long to keep retrying"
+        },
+        "publish_address": {
+          "name": "Publish address",
+          "description": "Where the node should publish (default 0xCEE8)"
+        }
+      }
+    },
+    "send_raw": {
+      "name": "Send raw message",
+      "description": "Send an access payload (opcode included, hex).",
+      "fields": {
+        "destination": {
+          "name": "Destination",
+          "description": "Address"
+        },
+        "payload": {
+          "name": "Payload",
+          "description": "Hex, opcode included"
+        },
+        "device_key": {
+          "name": "Device key",
+          "description": "Encrypt with the node's device key (Config messages)"
+        }
+      }
+    },
+    "pair_switch": {
+      "name": "Pair switch",
+      "description": "Make a dimmer react directly to a switch or dimmer wheel. The pairing is stored in the dimmer, so it works without Home Assistant.",
+      "fields": {
+        "node": {
+          "name": "Dimmer / actuator",
+          "description": "Address of the node that should react, e.g. 0x0003"
+        },
+        "switch": {
+          "name": "Switch / wheel",
+          "description": "Address of the switch or dimmer wheel, e.g. 0x0004"
+        },
+        "button": {
+          "name": "Button index",
+          "description": "4 for the SG Smart 3.0 dimmer wheel"
+        },
+        "press": {
+          "name": "Press",
+          "description": "What a short press does"
+        },
+        "hold": {
+          "name": "Hold",
+          "description": "What holding the button does"
+        },
+        "rotate": {
+          "name": "Rotate",
+          "description": "What turning the wheel does"
+        }
+      }
+    },
+    "unpair_switch": {
+      "name": "Unpair switch",
+      "description": "Remove a switch button's pairing from a dimmer.",
+      "fields": {
+        "node": {
+          "name": "Dimmer / actuator",
+          "description": "Address of the node that should react, e.g. 0x0003"
+        },
+        "switch": {
+          "name": "Switch / wheel",
+          "description": "Address of the switch or dimmer wheel, e.g. 0x0004"
+        },
+        "button": {
+          "name": "Button index",
+          "description": "4 for the SG Smart 3.0 dimmer wheel"
+        }
+      }
+    },
+    "set_min_level": {
+      "name": "Set minimum level",
+      "description": "Lowest level (%) at which an SG dimmer's load still lights. Home Assistant's 1–100 % is spread over this level to 100 %. 0 removes it.",
+      "fields": {
+        "unicast": {
+          "name": "Dimmer address",
+          "description": "e.g. 0x0003"
+        },
+        "min_level": {
+          "name": "Minimum level",
+          "description": "Level where the lamp starts to glow"
+        }
+      }
+    }
+  },
+  "selector": {
+    "switch_command": {
+      "options": {
+        "none": "Nothing",
+        "toggle_on_off": "Toggle on/off",
+        "on": "On",
+        "off": "Off",
+        "dim": "Dim up/down",
+        "dim_up": "Dim up",
+        "dim_down": "Dim down"
+      }
+    },
+    "pair_mode": {
+      "options": {
+        "pair": "Pair",
+        "unpair": "Remove pairing"
       }
     }
   }

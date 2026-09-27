@@ -35,16 +35,24 @@ merge them.
 
 from __future__ import annotations
 
-from homeassistant.components.sensor import SensorEntity
-from homeassistant.const import EntityCategory
+from homeassistant.components.sensor import (
+    RestoreSensor,
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.const import EntityCategory, UnitOfElectricPotential
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import BluetoothMeshConfigEntry
 from .const import DOMAIN
-from .coordinator import MeshCoordinator
+from .btmesh.sg_smart import SgButtonEvent
+from .coordinator import SIGNAL_NEW_SG_SWITCH, MeshCoordinator
+from .sg_switch import battery_voltage, switch_device_info
 
 
 async def async_setup_entry(
@@ -52,8 +60,77 @@ async def async_setup_entry(
     entry: BluetoothMeshConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """One entity per config entry: there is exactly one proxy link."""
-    async_add_entities([MeshProxySensor(entry.runtime_data)])
+    """The proxy link (one per entry), plus a battery sensor per SG switch."""
+    coordinator = entry.runtime_data
+    async_add_entities(
+        [
+            MeshProxySensor(coordinator),
+            *(SgSwitchBattery(coordinator, u) for u in coordinator.sg_switches),
+        ]
+    )
+
+    @callback
+    def _new_switch(unicast: int, first: SgButtonEvent) -> None:
+        async_add_entities([SgSwitchBattery(coordinator, unicast, first)])
+
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass, SIGNAL_NEW_SG_SWITCH.format(entry.entry_id), _new_switch
+        )
+    )
+
+
+class SgSwitchBattery(RestoreSensor):
+    """Battery voltage an SG switch/wheel reports with every button event.
+
+    The byte is 0.1 V (a wheel reads 2.9 V, sagging to 2.8 V while held), so
+    it is shown as voltage rather than guessed into a percentage. Only known
+    after the switch has been used; restored across restarts.
+    """
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_translation_key = "sg_battery_voltage"
+    _attr_device_class = SensorDeviceClass.VOLTAGE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfElectricPotential.VOLT
+    _attr_suggested_display_precision = 1
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: MeshCoordinator,
+        unicast: int,
+        first: SgButtonEvent | None = None,
+    ) -> None:
+        self._coordinator = coordinator
+        self._unicast = unicast
+        self._first = first
+        self._attr_unique_id = (
+            f"{coordinator.network.identifier}_{unicast:04x}_battery_voltage"
+        )
+        self._attr_device_info = switch_device_info(coordinator, unicast)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        if (last := await self.async_get_last_sensor_data()) is not None:
+            self._attr_native_value = last.native_value
+        self.async_on_remove(
+            self._coordinator.async_add_sg_button_listener(
+                self._unicast, self._handle_event
+            )
+        )
+        if self._first is not None:
+            self._handle_event(self._first)
+            self._first = None
+
+    @callback
+    def _handle_event(self, event: SgButtonEvent) -> None:
+        value = battery_voltage(event)
+        if value is None or value == self._attr_native_value:
+            return
+        self._attr_native_value = value
+        self.async_write_ha_state()
 
 
 class MeshProxySensor(SensorEntity):

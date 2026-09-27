@@ -47,6 +47,22 @@ DEFAULT_SRC_ADDR = 0
 # be left alone.
 CONF_INVERTED_CTL = "inverted_ctl"
 
+# Options key: unicasts of SG Smart switches / dimmer wheels heard on the mesh.
+# Filled automatically on a switch's first button event; each gets an event
+# entity and a battery sensor. A list, since options round-trip through JSON.
+CONF_SG_SWITCHES = "sg_switches"
+
+# Options key: per SG dimmer, the lowest SG level (percent) that still lights
+# the load. Home Assistant's 1..100 % is spread over min..100 so the bottom of
+# the slider is not dead. A dict keyed by the unicast as a decimal STRING,
+# since options round-trip through JSON (no integer keys).
+CONF_SG_MIN_LEVEL = "sg_min_level"
+
+# Options key: unicast addresses of nodes removed from the network. Never handed
+# out again: every other node still remembers the sequence number it last saw
+# from such an address, and would drop a newcomer's messages as replays.
+CONF_RETIRED_UNICASTS = "retired_unicasts"
+
 # SIG model identifiers the integration drives (spec Mesh Model §6/§7). They
 # live here rather than in ``light.py`` because the coordinator needs them too:
 # the AppKey to encrypt with is the one THESE models are bound to.
@@ -59,7 +75,12 @@ MODEL_LIGHT_CTL_TEMP = 0x1306
 
 # Every model a command may be addressed to. Used to resolve which application
 # key the network binds to the things we actually drive.
+# SG Armaturen "SG Smart 3.0" vendor model (company 0x0EE8, model 0x0000),
+# stored as company << 16 | model like every vendor model id here.
+MODEL_SG_VENDOR = 0x0EE80000
+
 CONTROLLED_MODEL_IDS = (
+    MODEL_SG_VENDOR,
     MODEL_GENERIC_ONOFF,
     MODEL_LIGHT_LIGHTNESS,
     MODEL_LIGHT_CTL,

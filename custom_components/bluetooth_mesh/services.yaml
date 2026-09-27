@@ -1,0 +1,115 @@
+get_composition:
+  fields:
+    unicast:
+      required: true
+      example: "0x0004"
+      selector:
+        text:
+    seconds:
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 300
+configure_node:
+  fields:
+    unicast:
+      required: true
+      example: "0x0004"
+      selector:
+        text:
+    seconds:
+      default: 60
+      selector:
+        number:
+          min: 10
+          max: 600
+    publish_address:
+      example: "0xCEE8"
+      selector:
+        text:
+send_raw:
+  fields:
+    destination:
+      required: true
+      example: "0x0003"
+      selector:
+        text:
+    payload:
+      required: true
+      example: "e0e80e070101000332ffffffffff"
+      selector:
+        text:
+    device_key:
+      default: false
+      selector:
+        boolean:
+pair_switch:
+  fields:
+    node:
+      required: true
+      example: "0x0003"
+      selector:
+        text:
+    switch:
+      required: true
+      example: "0x0004"
+      selector:
+        text:
+    button:
+      default: 4
+      selector:
+        number:
+          min: 0
+          max: 255
+    press:
+      default: toggle_on_off
+      selector:
+        select:
+          translation_key: switch_command
+          options: [toggle_on_off, "on", "off", dim, dim_up, dim_down, none]
+    hold:
+      default: none
+      selector:
+        select:
+          translation_key: switch_command
+          options: [none, dim, dim_up, dim_down, toggle_on_off, "on", "off"]
+    rotate:
+      default: dim
+      selector:
+        select:
+          translation_key: switch_command
+          options: [dim, none]
+unpair_switch:
+  fields:
+    node:
+      required: true
+      example: "0x0003"
+      selector:
+        text:
+    switch:
+      required: true
+      example: "0x0004"
+      selector:
+        text:
+    button:
+      default: 4
+      selector:
+        number:
+          min: 0
+          max: 255
+set_min_level:
+  fields:
+    unicast:
+      required: true
+      example: "0x0003"
+      selector:
+        text:
+    min_level:
+      required: true
+      example: 45
+      selector:
+        number:
+          min: 0
+          max: 90
+          unit_of_measurement: "%"

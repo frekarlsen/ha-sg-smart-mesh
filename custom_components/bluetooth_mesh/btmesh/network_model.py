@@ -317,7 +317,22 @@ class Network:
         # entire network unusable with no way to tell which one was at fault.
         nodes = []
         skipped: list[str] = []
+        # A Mesh Configuration Database export (nRF Mesh and others) lists the
+        # provisioner app itself as a node — nRF Mesh for iOS even gives it a
+        # Generic OnOff server, so it would surface as a phantom light. Its
+        # UUID is the one in ``provisioners[]``; leave those out.
+        provisioner_uuids = {
+            str(p.get("UUID", "")).replace("-", "").upper()
+            for p in data.get("provisioners", [])
+            if isinstance(p, dict)
+        } - {""}
         for raw_node in raw_nodes:
+            if (
+                isinstance(raw_node, dict)
+                and str(raw_node.get("UUID", "")).replace("-", "").upper()
+                in provisioner_uuids
+            ):
+                continue
             try:
                 nodes.append(_parse_node(raw_node))
             except NetworkModelError as exc:
@@ -457,7 +472,7 @@ def _hex_int(value: object, label: str) -> int:
 
 
 def _node_name(node: dict) -> str:
-    """Friendly name: ``tos_devices[0].name`` else ``tos_node.type`` else ""."""
+    """Friendly name: ``tos_devices[0].name``, ``tos_node.type``, ``name``, ""."""
     tos_devices = node.get("tos_devices")
     if isinstance(tos_devices, list) and tos_devices:
         name = tos_devices[0].get("name") if isinstance(tos_devices[0], dict) else None
@@ -468,6 +483,11 @@ def _node_name(node: dict) -> str:
         type_ = tos_node.get("type")
         if isinstance(type_, str) and type_:
             return type_
+    # Mesh Configuration Database exports (nRF Mesh, and nodes this integration
+    # adds itself) carry the name as a plain field.
+    name = node.get("name")
+    if isinstance(name, str) and name:
+        return name
     return ""
 
 
@@ -543,7 +563,10 @@ def _parse_node(raw: dict) -> Node:
         raise NetworkModelError("node entry is not an object")
     base_unicast = _hex_int(raw.get("unicastAddress"), "nodes[].unicastAddress")
     device_key = _hex_bytes(raw, "deviceKey", "nodes[].deviceKey")
-    cid = _hex_int(raw.get("cid"), "nodes[].cid")
+    # A node the provisioner has not configured yet (nRF Mesh exports it as
+    # soon as it is provisioned) carries no composition: no cid, no elements.
+    # Keep it anyway — its device key is exactly what configuring it needs.
+    cid = _hex_int(raw["cid"], "nodes[].cid") if raw.get("cid") else 0
     raw_elements = raw.get("elements", [])
     if not isinstance(raw_elements, list):
         raise NetworkModelError(

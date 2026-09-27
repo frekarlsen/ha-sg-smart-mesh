@@ -521,3 +521,9 @@ def test_parse_light_ctl_temperature_range_status_rejects_a_wrong_length():
 
     with pytest.raises(AccessError):
         parse_light_ctl_temperature_range_status(bytes.fromhex("8263" "00" "2003"))
+
+
+def test_config_node_reset_is_the_bare_opcode():
+    from btmesh.access import config_node_reset
+
+    assert config_node_reset() == bytes.fromhex("8049")

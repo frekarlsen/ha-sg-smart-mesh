@@ -1624,3 +1624,14 @@ async def test_a_mixed_group_whose_dimming_did_not_leave_stays_lit(hass) -> None
 
     assert all(m.is_on is True for m in members)
     assert dimmer.brightness == 40
+
+
+async def test_an_sg_switch_gets_no_light_entity(hass):
+    """A wheel's Generic OnOff server is its own state, not a lamp."""
+    network = _fixture_network()
+    first = network.nodes[0]
+    coordinator = FakeCoordinator(network)
+    coordinator.sg_switches = [first.unicast]
+    added: list = []
+    await async_setup_entry(hass, _entry(coordinator), lambda e: added.extend(e))
+    assert added == []  # the fixture's only lamp, now a "switch"

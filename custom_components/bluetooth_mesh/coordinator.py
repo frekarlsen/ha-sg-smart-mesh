@@ -41,15 +41,27 @@ from time import monotonic
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.storage import Store
 
 from .btmesh.controller import MeshController
 from .btmesh.crypto import k3
 from .btmesh.network_model import UNICAST_MAX, UNICAST_MIN, Network
+from .btmesh.sg_smart import (
+    OP_SG_STATUS,
+    SG_STATUS_GROUP,
+    SG_VENDOR_MODEL_ID,
+    SgButtonEvent,
+    SgStatus,
+    parse_sg_button_event,
+    parse_sg_status,
+)
 from .const import (
     CONF_CONNECT_JSON,
     CONF_KEEPALIVE,
+    CONF_SG_MIN_LEVEL,
+    CONF_SG_SWITCHES,
     CONF_SRC_ADDR,
     CONTROLLED_MODEL_IDS,
     DEFAULT_KEEPALIVE,
@@ -68,6 +80,31 @@ from .mesh_transport import (
 )
 
 logger = logging.getLogger(__name__)
+
+EVENT_MESH_MESSAGE = "bluetooth_mesh_message"
+
+
+def is_sg_switch(comp) -> bool:
+    """An SG battery switch / wheel: SG company, and no Proxy feature.
+
+    Mains SG nodes (pills, drivers) all support Proxy — the pill is what HA
+    connects through — while a battery node cannot, as it sleeps.
+    """
+    return comp.cid == 0x0EE8 and not comp.features & 0x0002
+
+# Dispatcher signal (formatted with the entry id) announcing a switch/wheel
+# unicast heard for the first time, so the event and battery platforms can add
+# its entities without a reload.
+SIGNAL_NEW_SG_SWITCH = "bluetooth_mesh_new_sg_switch_{}"
+
+# Dispatcher signal (entry id, unicast) when an SG dimmer's minimum level
+# changes; carries (old, new) so the light can keep its apparent brightness.
+SIGNAL_SG_MIN_LEVEL = "bluetooth_mesh_sg_min_level_{}_{}"
+
+# A switch sends each frame of a gesture more than once; a frame not newer
+# than the last one seen (same TID, SEQ not higher) inside this window is a
+# repeat.
+SG_EVENT_DEDUP_SECONDS = 2.0
 
 __all__ = ["MeshCoordinator"]
 
@@ -285,6 +322,14 @@ class MeshCoordinator:
         # Serialise everything through a single connection at a time: two
         # commands must never contend for the lamp's single proxy slot.
         self._lock = asyncio.Lock()
+        # SG Smart 3.0: entities listening for the power/level a node reports,
+        # keyed by the node's unicast. Fed both by replies to our own status
+        # requests and by status the node publishes on its own.
+        self._sg_listeners: dict[int, list] = {}
+        # SG switches and wheels: listeners for their button events, keyed by
+        # the switch's unicast, and the last (tid, time) seen per switch.
+        self._sg_button_listeners: dict[int, list] = {}
+        self._sg_last_event: dict[int, tuple[int, int, float]] = {}
 
     # ------------------------------------------------ derived from the export
 
@@ -728,6 +773,10 @@ class MeshCoordinator:
 
         self._client = client
         self._controller = controller
+        # Test doubles (and any controller predating the hook) may lack it.
+        set_listener = getattr(controller, "set_message_listener", None)
+        if set_listener is not None:
+            set_listener(self._on_mesh_message)
         # start() has already spent SEQ numbers: claiming the proxy filter is
         # two network PDUs. Until now the cursor only came back after a command,
         # so a link that carried none (a probe that hands the slot back, a
@@ -1031,6 +1080,262 @@ class MeshCoordinator:
                 unicast, kelvin, timeout=STATUS_TIMEOUT
             )
         )
+
+
+    # ------------------------------------------------------- SG Smart 3.0
+
+    @callback
+    def async_add_sg_listener(self, unicast: int, listener) -> CALLBACK_TYPE:
+        """Call ``listener(SgStatus)`` whenever node ``unicast`` reports."""
+        self._sg_listeners.setdefault(unicast, []).append(listener)
+
+        @callback
+        def _remove() -> None:
+            self._sg_listeners.get(unicast, []).remove(listener)
+
+        return _remove
+
+    def _on_mesh_message(self, msg) -> None:
+        """Every decrypted access message on the held link (bearer RX path)."""
+        # Discovery aid: every message becomes an HA event, so what a switch or
+        # a wheel sends can be watched live in Developer tools -> Events.
+        logger.debug(
+            "mesh RX from %#06x opcode %#x: %s", msg.src, msg.opcode, msg.params.hex()
+        )
+        self.hass.loop.call_soon_threadsafe(
+            self.hass.bus.async_fire,
+            EVENT_MESH_MESSAGE,
+            {
+                "source": f"0x{msg.src:04x}",
+                "opcode": f"0x{msg.opcode:x}",
+                "data": msg.params.hex(),
+            },
+        )
+        if msg.opcode != OP_SG_STATUS:
+            return
+        event = parse_sg_button_event(msg.params)
+        if event is not None:
+            self.hass.loop.call_soon_threadsafe(
+                self._handle_sg_button_event, msg.src, event
+            )
+            return
+        status = parse_sg_status(msg.params)
+        logger.debug(
+            "SG status from %#06x: %s -> %s", msg.src, msg.params.hex(), status
+        )
+        if status is None:
+            return
+        for listener in list(self._sg_listeners.get(msg.src, ())):
+            self.hass.loop.call_soon_threadsafe(listener, status)
+
+    # ------------------------------------------------ SG switches / wheels
+
+    @property
+    def sg_switches(self) -> list[int]:
+        """Unicasts of every SG switch/wheel heard so far (kept in options)."""
+        return list(self.entry.options.get(CONF_SG_SWITCHES, []))
+
+    @callback
+    def async_add_sg_button_listener(self, unicast: int, listener) -> CALLBACK_TYPE:
+        """Call ``listener(SgButtonEvent)`` for each new event from ``unicast``."""
+        self._sg_button_listeners.setdefault(unicast, []).append(listener)
+
+        @callback
+        def _remove() -> None:
+            self._sg_button_listeners.get(unicast, []).remove(listener)
+
+        return _remove
+
+    @callback
+    def _handle_sg_button_event(self, src: int, event: SgButtonEvent) -> None:
+        # Frames repeat (each is sent twice, and relays add more); a frame is
+        # new if it opens a gesture (new TID) or advances the current one.
+        now = monotonic()
+        last = self._sg_last_event.get(src)
+        if (
+            last is not None
+            and last[0] == event.tid
+            and event.seq <= last[1]
+            and now - last[2] < SG_EVENT_DEDUP_SECONDS
+        ):
+            return
+        self._sg_last_event[src] = (event.tid, event.seq, now)
+        logger.debug("SG button event from %#06x: %s", src, event)
+        if src not in self.sg_switches:
+            # First event from this switch: remember it (options survive a
+            # restart; no reload is triggered by writing them) and let the
+            # platforms add its entities. They pick this event up too.
+            self.hass.config_entries.async_update_entry(
+                self.entry,
+                options={
+                    **self.entry.options,
+                    CONF_SG_SWITCHES: sorted({*self.sg_switches, src}),
+                },
+            )
+            async_dispatcher_send(
+                self.hass, SIGNAL_NEW_SG_SWITCH.format(self.entry.entry_id), src, event
+            )
+            return
+        for listener in list(self._sg_button_listeners.get(src, ())):
+            listener(event)
+
+    async def async_sg_pair_switch(
+        self, node: int, switch: int, button: int, *,
+        press: int, hold: int, rotate: int,
+    ) -> bool:
+        """Pair ``switch``/``button`` to ``node`` in the node's own table."""
+
+        async def send(controller) -> bool:
+            await controller.sg_pair_switch(
+                node, switch, button, press=press, hold=hold, rotate=rotate
+            )
+            return not controller.failed
+
+        return bool(await self._run_connected(send))
+
+    def sg_min_level(self, unicast: int) -> int:
+        """Lowest SG level (%) that lights ``unicast``'s load; 0 = none set."""
+        return int(self.entry.options.get(CONF_SG_MIN_LEVEL, {}).get(str(unicast), 0))
+
+    @callback
+    def async_set_sg_min_level(self, unicast: int, level: int) -> None:
+        old = self.sg_min_level(unicast)
+        levels = dict(self.entry.options.get(CONF_SG_MIN_LEVEL, {}))
+        if level:
+            levels[str(unicast)] = level
+        else:
+            levels.pop(str(unicast), None)
+        self.hass.config_entries.async_update_entry(
+            self.entry, options={**self.entry.options, CONF_SG_MIN_LEVEL: levels}
+        )
+        async_dispatcher_send(
+            self.hass,
+            SIGNAL_SG_MIN_LEVEL.format(self.entry.entry_id, unicast),
+            old,
+            level,
+        )
+
+    async def async_sg_set_level(self, unicast: int, level: int) -> bool:
+        """SG power/level (0 off, 1..100 %, 101 last level); True if it left."""
+
+        async def send(controller) -> bool:
+            await controller.sg_set_level(unicast, level)
+            return not controller.failed
+
+        return bool(await self._run_connected(send))
+
+    async def async_sg_get_status(self, unicast: int) -> SgStatus | None:
+        """Ask an SG node for its power/level; None if unconfirmed."""
+        return await self._run_connected(
+            lambda c: c.sg_get_status(unicast, timeout=STATUS_TIMEOUT)
+        )
+
+
+    # ------------------------------------------------ node configuration
+
+    async def _retry(self, step, *, deadline: float):
+        """Run ``step(controller)`` until it answers or ``deadline`` passes.
+
+        A battery node listens only for a moment after it has sent something,
+        so a Config message is repeated until it happens to land in that
+        window — the user keeps turning the wheel meanwhile.
+        """
+        loop = asyncio.get_running_loop()
+        while True:
+            result = await self._run_connected(step)
+            if result is not None or loop.time() >= deadline:
+                return result
+            await asyncio.sleep(0.2)
+
+    async def async_get_composition_retry(self, unicast: int, seconds: float = 30):
+        deadline = asyncio.get_running_loop().time() + seconds
+        return await self._retry(
+            lambda c: c.get_composition(unicast, timeout=1.5), deadline=deadline
+        )
+
+    async def async_configure_node(
+        self, unicast: int, *, seconds: float = 60, publish: int | None = None
+    ) -> dict:
+        """Add our AppKey, bind every model, and point publication at HA.
+
+        Returns a report of each step, so a half-configured node can be told
+        apart from a silent one.
+        """
+        report, _comp = await self.async_configure_node_full(
+            unicast, seconds=seconds, publish=publish
+        )
+        return report
+
+    async def async_configure_node_full(
+        self, unicast: int, *, seconds: float = 60, publish: int | None = None
+    ):
+        """:meth:`async_configure_node`, also returning the Composition Data.
+
+        With ``publish`` unset the address is chosen per kind of node: an SG
+        switch or wheel publishes to all nodes (0xFFFF), since the dimmers it
+        is paired with act on its events directly; anything else publishes its
+        status to :data:`SG_STATUS_GROUP` for HA.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + seconds
+        kw = {"timeout": 1.5, "retries": 2}
+        report: dict = {"unicast": f"0x{unicast:04x}"}
+
+        comp = await self._retry(
+            lambda c: c.get_composition(unicast, timeout=1.5), deadline=deadline
+        )
+        if comp is None:
+            report["error"] = "no Composition Data reply (node asleep or unreachable)"
+            return report, None
+        report["composition"] = comp.describe()
+
+        status = await self._retry(
+            lambda c: c.add_app_key(unicast, **kw), deadline=deadline
+        )
+        # 0 = success, 6 = key index already stored: both mean "it has our key".
+        report["app_key_add"] = status
+
+        binds = {}
+        pubs = {}
+        if publish is None:
+            publish_to = 0xFFFF if is_sg_switch(comp) else SG_STATUS_GROUP
+        else:
+            publish_to = publish
+        for index, element in enumerate(comp.elements):
+            addr = unicast + index
+            models = [m for m in element.sig_models if m not in (0x0000, 0x0002)]
+            models += [(cid << 16) | mid for cid, mid in element.vendor_models]
+            for model in models:
+                key = f"0x{addr:04x}/0x{model:x}"
+                binds[key] = await self._retry(
+                    lambda c, a=addr, m=model: c.bind_model(a, m, unicast=unicast, **kw),
+                    deadline=deadline,
+                )
+                if model == SG_VENDOR_MODEL_ID or 0x1001 <= model <= 0x1FFF and model % 2:
+                    pubs[key] = await self._retry(
+                        lambda c, a=addr, m=model: c.set_publication(
+                            a, m, publish_to, unicast=unicast, **kw
+                        ),
+                        deadline=deadline,
+                    )
+        report["bind"] = binds
+        report["publication"] = {"address": f"0x{publish_to:04x}", "result": pubs}
+        return report, comp
+
+    async def async_node_reset(self, unicast: int, *, seconds: float = 45) -> bool:
+        """Config Node Reset, repeated until a sleeping node wakes; True if confirmed."""
+        deadline = asyncio.get_running_loop().time() + seconds
+        result = await self._retry(
+            lambda c: c.node_reset(unicast, timeout=1.5), deadline=deadline
+        )
+        return bool(result)
+
+    async def async_send_raw(self, dst: int, payload: bytes, dev_key: bool) -> bool:
+        async def send(controller) -> bool:
+            await controller.send_raw(dst, payload, dev_key=dev_key)
+            return not controller.failed
+
+        return bool(await self._run_connected(send))
 
     # ---------------------------------------------------------------- probe
 

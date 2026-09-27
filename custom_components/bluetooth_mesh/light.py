@@ -40,6 +40,7 @@ from homeassistant.components.light import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import BluetoothMeshConfigEntry
@@ -50,8 +51,9 @@ from .const import (
     MODEL_LIGHT_CTL,
     MODEL_LIGHT_CTL_TEMP,
     MODEL_LIGHT_LIGHTNESS,
+    MODEL_SG_VENDOR,
 )
-from .coordinator import MeshCoordinator
+from .coordinator import SIGNAL_SG_MIN_LEVEL, MeshCoordinator
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,7 @@ DEFAULT_MAX_KELVIN = 6500
 # back to the raw hex (see ``_manufacturer``).
 _KNOWN_CIDS = {
     0x07E9: "Häfele",
+    0x0EE8: "SG Armaturen",
 }
 
 
@@ -148,6 +151,25 @@ def _element_subscribes(element, address: int) -> bool:
     return any(address in model.subscribe for model in element.models)
 
 
+def _drop_switch_lights(hass, entry, coordinator, switches) -> None:
+    """Remove a light entity an earlier version created for an SG switch."""
+    if not switches:
+        return
+    from homeassistant.helpers import entity_registry as er
+
+    registry = er.async_get(hass)
+    identifier = coordinator.network.identifier
+    for node in coordinator.network.nodes:
+        if node.unicast not in switches:
+            continue
+        for unicast in [node.unicast, *(e.unicast for e in node.elements)]:
+            entity_id = registry.async_get_entity_id(
+                "light", DOMAIN, f"{identifier}_{unicast:04x}"
+            )
+            if entity_id is not None:
+                registry.async_remove(entity_id)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: BluetoothMeshConfigEntry,
@@ -169,7 +191,19 @@ async def async_setup_entry(
     # The output element behind each entity, so a group below can tell which
     # entities are already subscribed to it without re-deriving addressing.
     outputs_by_light: list[tuple[MeshLight, object]] = []
+    # SG wheels and switches carry a Generic OnOff server too (their own
+    # state), which would otherwise surface as a pointless on/off "light".
+    # They are buttons: their entities are the event and the battery sensor.
+    switches = set(getattr(coordinator, "sg_switches", ()))
+    _drop_switch_lights(hass, entry, coordinator, switches)
     for node in coordinator.network.nodes:
+        if node.unicast in switches:
+            continue
+        # SG Smart 3.0 dims through its vendor model only; its Generic OnOff
+        # server alone would make it a switch. One dimmer per node.
+        if node.has_model(MODEL_SG_VENDOR):
+            entities.append(SgDimmerLight(coordinator, node))
+            continue
         outputs = _outputs(node)
         if not outputs:
             continue
@@ -864,3 +898,182 @@ class MeshGroupLight(LightEntity):
             self._group.address, False
         ):
             self._roll_back(snapshots)
+
+
+# SG Smart levels are percent; HA brightness is a byte.
+SG_LEVEL_MAX = 100
+SG_LEVEL_LAST = 101
+
+
+class SgDimmerLight(LightEntity):
+    """An SG Armaturen "SG Smart 3.0" dimmer (LEDDim Smart Pill 3.0 and kin).
+
+    These nodes carry no Light Lightness server: power and level go through
+    SG's vendor command (see ``btmesh.sg_smart``), which is unacknowledged, so
+    the entity is optimistic on a Set and then confirms by asking the node for
+    its status. Status a node publishes on its own (dimmer wheel, push button)
+    arrives through the coordinator's SG listener and updates the entity
+    directly, provided the vendor model publishes to ``SG_STATUS_GROUP``.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = None
+    _attr_should_poll = False
+    _attr_color_mode = ColorMode.BRIGHTNESS
+    _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
+
+    def __init__(self, coordinator: MeshCoordinator, node) -> None:
+        self._coordinator = coordinator
+        element = node.element_for_model(MODEL_SG_VENDOR)
+        self._unicast = element.unicast if element is not None else node.unicast
+        self._attr_unique_id = f"{coordinator.network.identifier}_{node.unicast:04x}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._attr_unique_id)},
+            name=node.name or f"SG Smart {node.unicast:04x}",
+            manufacturer=_manufacturer(node.cid),
+            model="SG Smart 3.0 dimmer",
+        )
+        self._is_on: bool | None = None
+        self._level: int | None = None  # last non-zero percent
+        self._refresh_task: asyncio.Task | None = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self._coordinator.async_add_listener(self._handle_availability)
+        )
+        self.async_on_remove(
+            self._coordinator.async_add_sg_listener(self._unicast, self._handle_status)
+        )
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                SIGNAL_SG_MIN_LEVEL.format(
+                    self._coordinator.entry.entry_id, self._unicast
+                ),
+                self._handle_min_level,
+            )
+        )
+        if self._coordinator.available:
+            self._schedule_refresh()
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._refresh_task is not None:
+            self._refresh_task.cancel()
+            self._refresh_task = None
+        await super().async_will_remove_from_hass()
+
+    @callback
+    def _handle_availability(self) -> None:
+        self.async_write_ha_state()
+        if self._coordinator.available:
+            self._schedule_refresh()
+
+    @callback
+    def _handle_status(self, status) -> None:
+        self._is_on = status.on
+        if status.level > 0:
+            self._level = status.level
+        self.async_write_ha_state()
+
+    def _schedule_refresh(self, delay: float = 0.0) -> None:
+        if self._refresh_task is not None and not self._refresh_task.done():
+            return
+        self._refresh_task = self.hass.async_create_background_task(
+            self._refresh(delay), f"bluetooth_mesh sg refresh {self._unicast:04x}"
+        )
+
+    async def _refresh(self, delay: float) -> None:
+        if delay:
+            await asyncio.sleep(delay)
+        status = await self._coordinator.async_sg_get_status(self._unicast)
+        if status is not None:
+            self._handle_status(status)
+
+    @property
+    def available(self) -> bool:
+        return self._coordinator.available
+
+    @property
+    def is_on(self) -> bool | None:
+        return self._is_on
+
+    # --- HA percent <-> SG level, with the load's minimum level spread in.
+    #
+    # Many LED loads stay dark on a phase dimmer below some level (about 45 %
+    # on the first pill tested), and the pill ignores SG's trim command, so
+    # the minimum is applied here: HA's 1..100 % maps onto min..100 %. The
+    # wheel still dims the pill across its full range; a level under the
+    # minimum then shows as 1 %.
+
+    def _pct_to_level(self, pct: int, low: int | None = None) -> int:
+        if low is None:
+            low = self._coordinator.sg_min_level(self._unicast)
+        if low <= 1:
+            return pct
+        return round(low + (pct - 1) * (SG_LEVEL_MAX - low) / (SG_LEVEL_MAX - 1))
+
+    def _level_to_pct(self, level: int, low: int | None = None) -> int:
+        if low is None:
+            low = self._coordinator.sg_min_level(self._unicast)
+        if low <= 1:
+            return level
+        if level <= low:
+            return 1
+        return round(1 + (level - low) * (SG_LEVEL_MAX - 1) / (SG_LEVEL_MAX - low))
+
+    @callback
+    def _handle_min_level(self, old: int, new: int) -> None:
+        """The minimum moved: keep the slider where it is, re-light at the new map.
+
+        So adjusting the minimum is live — set the lamp to 1 % and move the
+        minimum up until it just glows.
+        """
+        if self._is_on and self._level is not None and self.hass is not None:
+            pct = self._level_to_pct(self._level, old)
+            level = self._pct_to_level(pct, new)
+            if level != self._level:
+                self.hass.async_create_task(self._send(level))
+                return
+        self.async_write_ha_state()
+
+    @property
+    def brightness(self) -> int | None:
+        if not self._is_on or self._level is None:
+            return None
+        pct = self._level_to_pct(self._level)
+        return max(1, round(pct * HA_BRIGHTNESS_MAX / SG_LEVEL_MAX))
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {
+            "sg_level": self._level,
+            "min_level": self._coordinator.sg_min_level(self._unicast),
+        }
+
+    async def _send(self, level: int) -> None:
+        was = (self._is_on, self._level)
+        if level == 0:
+            self._is_on = False
+        else:
+            self._is_on = True
+            if level <= SG_LEVEL_MAX:
+                self._level = level
+        self.async_write_ha_state()
+        if not await self._coordinator.async_sg_set_level(self._unicast, level):
+            self._is_on, self._level = was
+            self.async_write_ha_state()
+            return
+        # Unacknowledged Set: confirm with what the node says once it has
+        # finished fading.
+        self._schedule_refresh(delay=1.0)
+
+    async def async_turn_on(self, **kwargs) -> None:
+        if ATTR_BRIGHTNESS in kwargs:
+            pct = round(kwargs[ATTR_BRIGHTNESS] * SG_LEVEL_MAX / HA_BRIGHTNESS_MAX)
+            await self._send(self._pct_to_level(min(SG_LEVEL_MAX, max(1, pct))))
+        else:
+            await self._send(SG_LEVEL_LAST)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self._send(0)

@@ -13,9 +13,19 @@ index; addressing is by element unicast, taken from that same static model.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from .access import (
+    OP_CONFIG_APPKEY_STATUS,
+    OP_CONFIG_NODE_RESET_STATUS,
+    config_node_reset,
+    OP_CONFIG_MODEL_APP_STATUS,
+    OP_CONFIG_MODEL_PUBLICATION_STATUS,
+    config_appkey_add,
+    config_model_app_bind,
+    config_model_app_bind_vendor,
+    config_model_publication_set,
     OP_CONFIG_COMPOSITION_DATA_STATUS,
     OP_CONFIG_RELAY_STATUS,
     OP_GENERIC_ONOFF_STATUS,
@@ -64,6 +74,15 @@ from .proxy_pdu import (
     MSG_TYPE_PROXY_CONFIG,
 )
 from .pump import BearerPump
+from .sg_smart import (
+    OP_SG_STATUS,
+    SG_STATUS_GROUP,
+    SgStatus,
+    parse_sg_status,
+    sg_pair_switch,
+    sg_power_level_set,
+    sg_status_get,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +149,9 @@ class MeshController:
         # (:meth:`btmesh.network_model.Network.app_key_for_models`); the
         # export's first key is merely the default.
         self._app_key = network.app_key if app_key is None else app_key
+        self._net_key_index = network.net_key_index
+        held = {k.key: k.index for k in network.app_keys}
+        self._app_key_index = held.get(self._app_key, network.app_key_index)
         self._node = MeshNode(
             netkey=network.net_key,
             appkey=self._app_key,
@@ -252,7 +274,14 @@ class MeshController:
         """
         try:
             self._send_proxy_config(set_filter_type(FILTER_ACCEPT_LIST))
-            self._send_proxy_config(add_addresses([self._src]))
+            # SG Smart 3.0 nodes publish their own status changes (local
+            # operation with a wheel or button) to a group the user points
+            # their vendor model's publication at; forward that too.
+            # One address per message, our own first: a Telink proxy with a
+            # small filter list rejects an oversized Add as a whole, and an
+            # empty accept list forwards nothing — not even replies to us.
+            for address in (self._src, SG_STATUS_GROUP, 0xFFFF):
+                self._send_proxy_config(add_addresses([address]))
         except Exception as exc:  # noqa: BLE001 - never fail the connection
             logger.warning("could not configure the proxy filter: %s", exc)
 
@@ -324,6 +353,125 @@ class MeshController:
         tid = self._tid
         self._tid = (self._tid + 1) & 0xFF
         return tid
+
+    # ------------------------------------------------------ unsolicited RX
+
+    def set_message_listener(self, listener) -> None:
+        """Receive every decrypted access message (``ReceivedMessage``).
+
+        Used for the status a node publishes on its own; replies to our own
+        requests still resolve their waiters first.
+        """
+        self._node.on_message = listener
+
+    # ------------------------------------------------ node configuration
+
+    async def config_request(
+        self, unicast: int, payload: bytes, expected_opcode: int,
+        *, timeout: float = 2.0, retries: int = 0,
+    ) -> bytes | None:
+        """Device-keyed Config message; the reply's parameters or None."""
+        try:
+            resp = await self._node.request(
+                unicast, payload, expected_opcode,
+                dev_key=True, timeout=timeout, retries=retries,
+            )
+        except (TimeoutError, NodeError) as exc:
+            logger.debug("config %#x to %#06x: %s", expected_opcode, unicast, exc)
+            return None
+        return resp.params
+
+    async def node_reset(self, unicast: int, **kw) -> bool | None:
+        """Config Node Reset; True once the node confirmed, None if silent."""
+        params = await self.config_request(
+            unicast, config_node_reset(), OP_CONFIG_NODE_RESET_STATUS, **kw
+        )
+        return None if params is None else True
+
+    async def add_app_key(self, unicast: int, **kw) -> int | None:
+        """Config AppKey Add of our AppKey; the status code (0 = success)."""
+        params = await self.config_request(
+            unicast,
+            config_appkey_add(self._net_key_index, self._app_key_index, self._app_key),
+            OP_CONFIG_APPKEY_STATUS, **kw,
+        )
+        return None if params is None else params[0]
+
+    async def bind_model(self, element: int, model_id: int, *, unicast: int, **kw):
+        """Config Model App Bind; the status code (0 = success) or None."""
+        if model_id > 0xFFFF:
+            payload = config_model_app_bind_vendor(
+                element, self._app_key_index, model_id >> 16, model_id & 0xFFFF
+            )
+        else:
+            payload = config_model_app_bind(element, self._app_key_index, model_id)
+        params = await self.config_request(
+            unicast, payload, OP_CONFIG_MODEL_APP_STATUS, **kw
+        )
+        return None if params is None else params[0]
+
+    async def set_publication(
+        self, element: int, model_id: int, address: int, *, unicast: int, **kw
+    ):
+        """Config Model Publication Set; the status code (0 = success) or None."""
+        params = await self.config_request(
+            unicast,
+            config_model_publication_set(
+                element, address, self._app_key_index, model_id
+            ),
+            OP_CONFIG_MODEL_PUBLICATION_STATUS, **kw,
+        )
+        return None if params is None else params[0]
+
+    async def send_raw(self, dst: int, payload: bytes, *, dev_key: bool = False):
+        """Send an arbitrary access payload (opcode included); fire-and-forget."""
+        self._node.send_access(dst, payload, dev_key=dev_key)
+        await self._pump.flush()
+
+    # ------------------------------------------------------ SG Smart 3.0
+
+    async def sg_set_level(self, unicast: int, level: int) -> None:
+        """SG vendor power/level (0 off, 1..100 %, 101 last level); unacked."""
+        tid = self._next_tid()
+        self._node.send_access(
+            unicast, sg_power_level_set(unicast, level, tid=tid, seq=tid)
+        )
+        await self._pump.flush()
+
+    async def sg_pair_switch(
+        self, node: int, switch: int, button: int, *,
+        press: int, hold: int, rotate: int, repeats: int = 2,
+    ) -> None:
+        """Write a switch pairing into ``node``'s own table; unacknowledged.
+
+        Sent ``repeats`` times with the same TID: the node drops the duplicate,
+        and a lost first copy (the command carries no reply) is covered.
+        """
+        tid = self._next_tid()
+        payload = sg_pair_switch(
+            node, switch, button, press=press, hold=hold, rotate=rotate,
+            tid=tid, seq=tid,
+        )
+        for attempt in range(max(1, repeats)):
+            if attempt:
+                await asyncio.sleep(0.3)
+            self._node.send_access(node, payload)
+            await self._pump.flush()
+
+    async def sg_get_status(
+        self, unicast: int, *, timeout: float = 3.0, retries: int = 1
+    ) -> SgStatus | None:
+        """Ask an SG node for its power/level; None if it stayed silent."""
+        tid = self._next_tid()
+        try:
+            resp = await self._node.request(
+                unicast, sg_status_get(unicast, tid=tid, seq=tid), OP_SG_STATUS,
+                timeout=timeout, retries=retries,
+            )
+        except TimeoutError:
+            logger.debug("sg_get_status(%#06x) timed out", unicast)
+            return None
+        return parse_sg_status(resp.params)
 
     # ------------------------------------------------------------- commands
 

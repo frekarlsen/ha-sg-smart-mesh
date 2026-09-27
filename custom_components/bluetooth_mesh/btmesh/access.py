@@ -17,6 +17,9 @@ __all__ = [
     "AccessError",
     # Foundation opcodes
     "OP_CONFIG_APPKEY_ADD",
+    "OP_CONFIG_NODE_RESET",
+    "OP_CONFIG_NODE_RESET_STATUS",
+    "config_node_reset",
     "OP_CONFIG_COMPOSITION_DATA_STATUS",
     "OP_CONFIG_APPKEY_STATUS",
     "OP_CONFIG_COMPOSITION_DATA_GET",
@@ -109,9 +112,15 @@ __all__ = [
 OP_CONFIG_APPKEY_ADD = 0x00
 OP_CONFIG_COMPOSITION_DATA_STATUS = 0x02
 OP_CONFIG_APPKEY_STATUS = 0x8003
+# Config Node Reset (spec §4.3.2.53/54): the node forgets its keys and address
+# and goes back to being unprovisioned, as a factory reset does.
+OP_CONFIG_NODE_RESET = 0x8049
+OP_CONFIG_NODE_RESET_STATUS = 0x804A
 OP_CONFIG_COMPOSITION_DATA_GET = 0x8008
 OP_CONFIG_MODEL_APP_BIND = 0x803D
 OP_CONFIG_MODEL_APP_STATUS = 0x803E
+OP_CONFIG_MODEL_PUBLICATION_SET = 0x03
+OP_CONFIG_MODEL_PUBLICATION_STATUS = 0x8019
 OP_CONFIG_RELAY_GET = 0x8026
 OP_CONFIG_RELAY_STATUS = 0x8028
 # Generic OnOff model opcodes (Mesh Model spec §7.1, Zephyr mesh sample).
@@ -402,6 +411,11 @@ def _unpack_key_indexes(data: bytes) -> tuple[int, int]:
 # ------------------------------------------------------------------ encoders
 
 
+def config_node_reset() -> bytes:
+    """Config Node Reset access payload (no parameters; device key)."""
+    return encode_opcode(OP_CONFIG_NODE_RESET)
+
+
 def config_appkey_add(netkey_idx: int, appkey_idx: int, appkey: bytes) -> bytes:
     """Config AppKey Add access payload (spec §4.3.2.37)."""
     if len(appkey) != 16:
@@ -451,6 +465,38 @@ def config_model_app_bind_vendor(
         + appkey_idx.to_bytes(2, "little")
         + company_id.to_bytes(2, "little")
         + model_id.to_bytes(2, "little")
+    )
+
+
+def config_model_publication_set(
+    element_addr: int,
+    publish_addr: int,
+    appkey_idx: int,
+    model_id: int,
+    *,
+    ttl: int = 5,
+    period: int = 0,
+    retransmit: int = 0,
+) -> bytes:
+    """Config Model Publication Set (spec §4.3.2.16).
+
+    ``model_id`` > 0xFFFF is a vendor model (company << 16 | model), encoded as
+    company (2 LE) + model (2 LE); otherwise a 2-octet SIG model id.
+    """
+    _check_key_index("AppKeyIndex", appkey_idx)
+    if model_id > 0xFFFF:
+        model = (model_id >> 16).to_bytes(2, "little") + (model_id & 0xFFFF).to_bytes(
+            2, "little"
+        )
+    else:
+        model = model_id.to_bytes(2, "little")
+    return (
+        encode_opcode(OP_CONFIG_MODEL_PUBLICATION_SET)
+        + element_addr.to_bytes(2, "little")
+        + publish_addr.to_bytes(2, "little")
+        + (appkey_idx & 0x0FFF).to_bytes(2, "little")  # credential flag 0
+        + bytes([ttl & 0xFF, period & 0xFF, retransmit & 0xFF])
+        + model
     )
 
 

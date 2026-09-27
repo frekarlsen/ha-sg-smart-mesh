@@ -11,10 +11,16 @@ from homeassistant.exceptions import ConfigEntryError
 
 from .btmesh.access import HAEFELE_COMPANY_ID
 from .btmesh.network_model import NetworkModelError
+from .services import async_register_services
 from .const import CONF_INVERTED_CTL, DOMAIN, MODEL_LIGHT_CTL
 from .coordinator import MeshCoordinator
 
-PLATFORMS: list[Platform] = [Platform.LIGHT, Platform.SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.EVENT,
+    Platform.LIGHT,
+    Platform.NUMBER,
+    Platform.SENSOR,
+]
 
 # The runtime data is the mesh coordinator: it owns the proxy connection, the
 # controller, and the parsed network model the entities enumerate.
@@ -54,6 +60,7 @@ async def async_setup_entry(
     # listener pattern as deprecated and stops honouring it in 2026.12.
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    async_register_services(hass)
     return True
 
 

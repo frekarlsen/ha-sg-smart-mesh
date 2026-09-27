@@ -41,6 +41,15 @@ FIXTURE = (
 )
 
 
+async def _open_settings(hass, entry_id):
+    """Open the options flow and pick "settings" from its menu."""
+    result = await hass.config_entries.options.async_init(entry_id)
+    assert result["type"] is FlowResultType.MENU
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "settings"}
+    )
+
+
 def _connect_text() -> str:
     return FIXTURE.read_text(encoding="utf-8")
 
@@ -159,9 +168,9 @@ async def test_options_flow_sets_keepalive_and_reloads_the_entry(hass) -> None:
             return_value=lambda: None,
         ),
     ):
-        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await _open_settings(hass, entry.entry_id)
         assert result["type"] is FlowResultType.FORM
-        assert result["step_id"] == "init"
+        assert result["step_id"] == "settings"
 
         result = await hass.config_entries.options.async_configure(
             result["flow_id"], {CONF_KEEPALIVE: 120}
@@ -322,7 +331,7 @@ async def test_options_flow_stores_a_source_address_override(hass) -> None:
             return_value=lambda: None,
         ),
     ):
-        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await _open_settings(hass, entry.entry_id)
         result = await hass.config_entries.options.async_configure(
             result["flow_id"], {CONF_KEEPALIVE: 0, CONF_SRC_ADDR: 0x0030}
         )
@@ -378,7 +387,7 @@ async def test_options_flow_stores_inverted_lamps_as_addresses(hass) -> None:
             return_value=lambda: None,
         ),
     ):
-        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await _open_settings(hass, entry.entry_id)
         assert CONF_INVERTED_CTL in {
             str(key) for key in result["data_schema"].schema
         }
@@ -426,7 +435,7 @@ async def test_options_flow_can_clear_every_inverted_lamp(hass) -> None:
         await hass.async_block_till_done()
         assert entry.options[CONF_INVERTED_CTL] == [0x000C]  # seeded
 
-        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await _open_settings(hass, entry.entry_id)
         result = await hass.config_entries.options.async_configure(
             result["flow_id"],
             {CONF_KEEPALIVE: 0, CONF_SRC_ADDR: 0, CONF_INVERTED_CTL: []},
@@ -478,7 +487,7 @@ async def test_options_flow_keeps_inverted_lamps_when_the_field_is_absent(
             config_flow.BluetoothMeshOptionsFlow, "_ctl_nodes", return_value=[]
         ),
     ):
-        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await _open_settings(hass, entry.entry_id)
         assert CONF_INVERTED_CTL not in {
             str(key) for key in result["data_schema"].schema
         }
@@ -554,7 +563,7 @@ async def test_options_form_survives_a_lamp_that_left_the_export(hass) -> None:
             return_value=lambda: None,
         ),
     ):
-        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await _open_settings(hass, entry.entry_id)
         field = next(
             key
             for key in result["data_schema"].schema
@@ -571,5 +580,197 @@ async def test_options_form_survives_a_lamp_that_left_the_export(hass) -> None:
         assert entry.options[CONF_INVERTED_CTL] == [0x0042]
 
         await hass.async_block_till_done()
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+# ------------------------------------------------ device menu (add / backup)
+
+
+def _menu_entry(hass) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Hjem",
+        data={CONF_CONNECT_JSON: _connect_text()},
+        unique_id="0F0E0D0C-0B0A-0908-0706-050403020100",
+    )
+    entry.add_to_hass(hass)
+    return entry
+
+
+async def _pick(hass, entry, step):
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": step}
+    )
+
+
+async def test_menu_backup_writes_the_network_file(hass, tmp_path) -> None:
+    hass.config.config_dir = str(tmp_path)
+    entry = _menu_entry(hass)
+    result = await _pick(hass, entry, "backup")
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "backup_written"
+    assert (tmp_path / "bluetooth_mesh_backup_Hjem.json").exists()
+
+
+async def test_add_device_needs_a_running_integration(hass) -> None:
+    entry = _menu_entry(hass)
+    result = await _pick(hass, entry, "add_device")
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "not_loaded"
+
+
+async def test_add_device_lists_beacons_and_runs_to_the_end(hass) -> None:
+    from custom_components.bluetooth_mesh import provisioning as prov_mod
+    from custom_components.bluetooth_mesh.provisioning import UnprovisionedBeacon
+
+    entry = _menu_entry(hass)
+    beacon = UnprovisionedBeacon(
+        address="AA:BB:CC:DD:EE:FF", uuid=bytes(16), name="SG", rssi=-60
+    )
+    added = []
+
+    async def fake_add(hass_, entry_, beacon_, name):
+        added.append((beacon_.address, name))
+        return {"name": name, "unicast": "0x0005", "configured": True, "kind": "device"}
+
+    with (
+        patch.object(coordinator_mod, "find_proxy_address", return_value=None),
+        patch.object(coordinator_mod, "discovered_proxies", return_value=[]),
+        patch.object(
+            coordinator_mod, "async_register_proxy_callback", return_value=lambda: None
+        ),
+    ):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        with patch.object(prov_mod, "discovered_unprovisioned", return_value=[]):
+            result = await _pick(hass, entry, "add_device")
+        assert result["type"] is FlowResultType.FORM
+        assert result["errors"] == {"base": "no_devices"}
+
+        with (
+            patch.object(prov_mod, "discovered_unprovisioned", return_value=[beacon]),
+            patch.object(prov_mod, "async_add_device", fake_add),
+        ):
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], {}
+            )
+            assert result["step_id"] == "add_device"
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], {"device": beacon.address, "name": "Stue"}
+            )
+            if result["type"] is FlowResultType.SHOW_PROGRESS:
+                await hass.async_block_till_done()
+                result = await hass.config_entries.options.async_configure(
+                    result["flow_id"]
+                )
+        assert result["type"] is FlowResultType.ABORT
+        assert result["reason"] == "device_added"
+        assert added == [(beacon.address, "Stue")]
+
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def _run(hass, result, user_input):
+    """Submit a form whose step runs as a progress task, and finish it."""
+    result = await hass.config_entries.options.async_configure(result["flow_id"], user_input)
+    while result["type"] is FlowResultType.SHOW_PROGRESS:
+        await hass.async_block_till_done()
+        result = await hass.config_entries.options.async_configure(result["flow_id"])
+    return result
+
+
+async def test_pair_switch_menu_pairs_by_name(hass) -> None:
+    from custom_components.bluetooth_mesh import config_flow as flow_mod
+
+    entry = _menu_entry(hass)
+    sent = []
+
+    async def fake_pair(node, switch, button, *, press, hold, rotate):
+        sent.append((node, switch, button, int(press), int(hold), int(rotate)))
+        return True
+
+    with (
+        patch.object(coordinator_mod, "find_proxy_address", return_value=None),
+        patch.object(coordinator_mod, "discovered_proxies", return_value=[]),
+        patch.object(
+            coordinator_mod, "async_register_proxy_callback", return_value=lambda: None
+        ),
+    ):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        # The sample network has no SG nodes.
+        result = await _pick(hass, entry, "pair_switch")
+        assert result["reason"] == "nothing_to_pair"
+
+        with (
+            patch.object(
+                flow_mod.BluetoothMeshOptionsFlow,
+                "_sg_nodes",
+                return_value=([(3, "Stue pille (0003)")], [(4, "Hjul (0004)")]),
+            ),
+            patch.object(entry.runtime_data, "async_sg_pair_switch", fake_pair),
+        ):
+            result = await _pick(hass, entry, "pair_switch")
+            assert result["step_id"] == "pair_switch"
+            result = await _run(hass, result, {"switch": "0004", "node": "0003", "mode": "pair",
+                 "press": "toggle_on_off", "rotate": "dim", "hold": "none"})
+            assert result["reason"] == "paired"
+            assert sent == [(3, 4, 4, 0x0A, 0xFF, 0x0B)]
+
+            result = await _pick(hass, entry, "pair_switch")
+            result = await _run(hass, result, {"switch": "0004", "node": "0003", "mode": "unpair",
+                 "press": "toggle_on_off", "rotate": "dim", "hold": "none"})
+            assert result["reason"] == "unpaired"
+            assert sent[-1] == (3, 4, 4, 0xFF, 0xFF, 0xFF)
+
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_remove_device_menu_runs_the_removal(hass) -> None:
+    from custom_components.bluetooth_mesh import config_flow as flow_mod
+    from custom_components.bluetooth_mesh import provisioning as prov_mod
+
+    entry = _menu_entry(hass)
+    removed = []
+
+    async def fake_remove(hass_, entry_, unicast, *, force):
+        removed.append((unicast, force))
+        return {"unicast": f"0x{unicast:04x}", "reset": True, "unpaired": []}
+
+    with (
+        patch.object(coordinator_mod, "find_proxy_address", return_value=None),
+        patch.object(coordinator_mod, "discovered_proxies", return_value=[]),
+        patch.object(
+            coordinator_mod, "async_register_proxy_callback", return_value=lambda: None
+        ),
+    ):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        with (
+            patch.object(
+                flow_mod.BluetoothMeshOptionsFlow,
+                "_sg_nodes",
+                return_value=([(3, "Stue pille (0003)")], [(4, "Hjul (0004)")]),
+            ),
+            patch.object(prov_mod, "async_remove_device", fake_remove),
+        ):
+            result = await _pick(hass, entry, "remove_device")
+            assert result["step_id"] == "remove_device"
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], {"device": "0004", "force": False}
+            )
+            if result["type"] is FlowResultType.SHOW_PROGRESS:
+                await hass.async_block_till_done()
+                result = await hass.config_entries.options.async_configure(
+                    result["flow_id"]
+                )
+        assert result["reason"] == "device_removed"
+        assert removed == [(4, False)]
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()

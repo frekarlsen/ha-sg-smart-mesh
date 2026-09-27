@@ -441,3 +441,33 @@ def test_keypair_on_wrong_curve_rejected():
             keypair=ec.generate_private_key(ec.SECP384R1()),
         )
     assert "P-256" in str(excinfo.value)
+
+
+# ---------------------------------------------------- on_capabilities hook
+
+
+def _caps(num_elements: int) -> bytes:
+    return Capabilities(
+        num_elements=num_elements, algorithms=1, public_key_type=0,
+        static_oob_type=0, output_oob_size=0, output_oob_actions=0,
+        input_oob_size=0, input_oob_actions=0,
+    ).encode()
+
+
+def test_on_capabilities_may_choose_the_address_from_the_element_count():
+    sent: list = []
+    prov = Provisioner(bytes(16), 0, 0, 0x0002, send=sent.append)
+    prov.on_capabilities = lambda caps: setattr(
+        prov, "unicast_addr", 0x0010 + caps.num_elements
+    )
+    prov.start()
+    prov.handle_pdu(_caps(3))
+    assert prov.unicast_addr == 0x0013
+
+
+def test_on_capabilities_choosing_a_bad_address_fails_the_session():
+    prov = Provisioner(bytes(16), 0, 0, 0x0002, send=lambda _pdu: None)
+    prov.on_capabilities = lambda caps: setattr(prov, "unicast_addr", 0x8000)
+    prov.start()
+    with pytest.raises(BtMeshError):
+        prov.handle_pdu(_caps(1))

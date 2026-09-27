@@ -526,15 +526,19 @@ async def test_start_configures_the_proxy_filter():
     """
     controller, bearer, _ = make_setup()
     await controller.start()
-    await _drain_proxy_config(bearer, 2)
+    await _drain_proxy_config(bearer, 4)
     try:
+        # One address per Add, our own first (a Telink proxy rejects an
+        # oversized Add as a whole and would then forward nothing).
         assert bearer.proxy_config == [
             bytes([OP_SET_FILTER_TYPE, FILTER_ACCEPT_LIST]),
             bytes([OP_ADD_ADDRESSES]) + (0x7FFF).to_bytes(2, "big"),
+            bytes([OP_ADD_ADDRESSES]) + (0xCEE8).to_bytes(2, "big"),
+            bytes([OP_ADD_ADDRESSES]) + (0xFFFF).to_bytes(2, "big"),
         ]
-        # The server confirmed one address in an accept list.
+        # The server confirmed all three addresses.
         assert controller.filter_status == FilterStatus(
-            filter_type=FILTER_ACCEPT_LIST, list_size=1
+            filter_type=FILTER_ACCEPT_LIST, list_size=3
         )
     finally:
         await controller.stop()
@@ -571,10 +575,10 @@ async def test_proxy_filter_messages_travel_as_proxy_config_pdus():
     """They must go out under the proxy-config message type, not as mesh traffic."""
     controller, bearer, _ = make_setup()
     await controller.start()
-    await _drain_proxy_config(bearer, 2)
+    await _drain_proxy_config(bearer, 4)
     try:
         types = [msg_type for msg_type, _ in bearer.sent]
-        assert types == [MSG_TYPE_PROXY_CONFIG, MSG_TYPE_PROXY_CONFIG]
+        assert types == [MSG_TYPE_PROXY_CONFIG] * 4
     finally:
         await controller.stop()
 

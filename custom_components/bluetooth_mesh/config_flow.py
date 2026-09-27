@@ -39,12 +39,16 @@ from .btmesh.network_model import Network, NetworkModelError
 from .const import (
     CONF_CONNECT_JSON,
     CONF_INVERTED_CTL,
+    CONF_RETIRED_UNICASTS,
+    CONF_SG_MIN_LEVEL,
+    CONF_SG_SWITCHES,
     CONF_KEEPALIVE,
     CONF_SRC_ADDR,
     DEFAULT_KEEPALIVE,
     DEFAULT_SRC_ADDR,
     DOMAIN,
     MODEL_LIGHT_CTL,
+    MODEL_SG_VENDOR,
 )
 
 
@@ -159,6 +163,10 @@ class BluetoothMeshConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
 
+# "Device" choice in the add-device form that just searches again.
+RESCAN = "rescan"
+
+
 class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
     """Tune runtime behaviour: how long to hold the proxy connection open.
 
@@ -173,7 +181,306 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
     are mutually exclusive — registering a listener makes this class raise.
     """
 
+    _beacons: list = []
+    _add_task = None
+    _add_name = ""
+    _add_result: dict | None = None
+    _add_error = ""
+
     async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Menu: connection settings, add a device, or back up the network."""
+        return self.async_show_menu(
+            step_id="init",
+            menu_options=[
+                "add_device", "pair_switch", "remove_device", "backup", "settings",
+            ],
+        )
+
+    # ------------------------------------------------------- pair switch
+
+    def _sg_nodes(self):
+        """(dimmers, switches) as (unicast, label) lists, from the live network."""
+        coordinator = self.config_entry.runtime_data
+        known_switches = set(coordinator.sg_switches)
+        dimmers, switches = [], []
+        for node in coordinator.network.nodes:
+            label = f"{node.name or 'SG Smart'} ({node.unicast:04x})"
+            if node.unicast in known_switches:
+                switches.append((node.unicast, label))
+            elif node.has_model(MODEL_SG_VENDOR):
+                dimmers.append((node.unicast, label))
+            elif node.cid in (0, 0x0EE8):
+                # Not configured through HA yet (e.g. added with nRF Mesh):
+                # no composition stored, so it could be a switch.
+                switches.append((node.unicast, label))
+        listed = {u for u, _ in switches} | {u for u, _ in dimmers}
+        for unicast in sorted(known_switches - listed):
+            switches.append((unicast, f"SG Smart switch ({unicast:04x})"))
+        return dimmers, switches
+
+    async def async_step_pair_switch(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Make a dimmer react directly to a wheel / switch (or undo it)."""
+        from .btmesh.sg_smart import SgSwitchCommand
+        from .services import SWITCH_COMMANDS
+
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        if coordinator is None:
+            return self.async_abort(reason="not_loaded")
+        dimmers, switches = self._sg_nodes()
+        if not dimmers or not switches:
+            return self.async_abort(reason="nothing_to_pair")
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            node = int(user_input["node"], 16)
+            switch = int(user_input["switch"], 16)
+            if user_input["mode"] == "unpair":
+                press = hold = rotate = SgSwitchCommand.NONE
+            else:
+                press = SWITCH_COMMANDS[user_input["press"]]
+                hold = SWITCH_COMMANDS[user_input["hold"]]
+                rotate = SWITCH_COMMANDS[user_input["rotate"]]
+            ok = await coordinator.async_sg_pair_switch(
+                node, switch, 4, press=press, hold=hold, rotate=rotate
+            )
+            if ok:
+                names = dict(dimmers) | dict(switches)
+                return self.async_abort(
+                    reason="unpaired" if user_input["mode"] == "unpair" else "paired",
+                    description_placeholders={
+                        "switch": names.get(switch, f"{switch:04x}"),
+                        "node": names.get(node, f"{node:04x}"),
+                    },
+                )
+            errors["base"] = "send_failed"
+
+        def select(options, translation_key=None):
+            config = SelectSelectorConfig(
+                options=options, mode=SelectSelectorMode.DROPDOWN
+            )
+            if translation_key:
+                config["translation_key"] = translation_key
+            return SelectSelector(config)
+
+        def units(pairs):
+            return [SelectOptionDict(value=f"{u:04x}", label=l) for u, l in pairs]
+
+        commands = ["toggle_on_off", "on", "off", "dim", "dim_up", "dim_down", "none"]
+        schema = vol.Schema(
+            {
+                vol.Required("switch", default=f"{switches[0][0]:04x}"): select(units(switches)),
+                vol.Required("node", default=f"{dimmers[0][0]:04x}"): select(units(dimmers)),
+                vol.Required("mode", default="pair"): select(["pair", "unpair"], "pair_mode"),
+                vol.Required("press", default="toggle_on_off"): select(commands, "switch_command"),
+                vol.Required("rotate", default="dim"): select(["dim", "none"], "switch_command"),
+                vol.Required("hold", default="none"): select(commands, "switch_command"),
+            }
+        )
+        return self.async_show_form(
+            step_id="pair_switch", data_schema=schema, errors=errors
+        )
+
+    # ----------------------------------------------------- remove device
+
+    _remove_task = None
+    _remove_label = ""
+    _remove_result: dict | None = None
+
+    async def async_step_remove_device(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick a device to factory reset and remove, like the SG app does."""
+        coordinator = getattr(self.config_entry, "runtime_data", None)
+        if coordinator is None:
+            return self.async_abort(reason="not_loaded")
+        dimmers, switches = self._sg_nodes()
+        choices = dict(dimmers) | dict(switches)
+        for node in coordinator.network.nodes:
+            choices.setdefault(node.unicast, f"{node.name or 'Mesh'} ({node.unicast:04x})")
+        if not choices:
+            return self.async_abort(reason="nothing_to_remove")
+        if user_input is not None:
+            self._remove_unicast = int(user_input["device"], 16)
+            self._remove_force = bool(user_input.get("force"))
+            self._remove_label = choices.get(self._remove_unicast, user_input["device"])
+            return await self.async_step_remove_device_run()
+        schema = vol.Schema(
+            {
+                vol.Required("device"): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[
+                            SelectOptionDict(value=f"{u:04x}", label=label)
+                            for u, label in sorted(choices.items())
+                        ],
+                        mode=SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+                vol.Optional("force", default=False): bool,
+            }
+        )
+        return self.async_show_form(step_id="remove_device", data_schema=schema)
+
+    async def async_step_remove_device_run(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        from .provisioning import async_remove_device
+
+        if self._remove_task is None:
+            self._remove_task = self.hass.async_create_task(
+                async_remove_device(
+                    self.hass, self.config_entry, self._remove_unicast,
+                    force=self._remove_force,
+                ),
+                "bluetooth_mesh remove device",
+            )
+        if not self._remove_task.done():
+            return self.async_show_progress(
+                step_id="remove_device_run",
+                progress_action="removing",
+                progress_task=self._remove_task,
+                description_placeholders={"name": self._remove_label},
+            )
+        task, self._remove_task = self._remove_task, None
+        try:
+            self._remove_result = task.result()
+        except Exception as exc:  # noqa: BLE001 - shown to the user
+            self._add_error = str(exc) or type(exc).__name__
+            return self.async_show_progress_done(next_step_id="remove_device_failed")
+        return self.async_show_progress_done(next_step_id="remove_device_done")
+
+    async def async_step_remove_device_done(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        result = self._remove_result or {}
+        return self.async_abort(
+            reason="device_removed" if result.get("reset") else "device_forgotten",
+            description_placeholders={"name": self._remove_label},
+        )
+
+    async def async_step_remove_device_failed(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return self.async_abort(
+            reason="remove_device_failed",
+            description_placeholders={"name": self._remove_label, "error": self._add_error},
+        )
+
+    # ------------------------------------------------------------ backup
+
+    async def async_step_backup(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        from .provisioning import async_write_backup
+
+        path = await async_write_backup(self.hass, self.config_entry)
+        return self.async_abort(
+            reason="backup_written", description_placeholders={"path": path}
+        )
+
+    # -------------------------------------------------------- add device
+
+    async def async_step_add_device(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick an unprovisioned device HA can see, and name it."""
+        from .provisioning import discovered_unprovisioned
+
+        if getattr(self.config_entry, "runtime_data", None) is None:
+            return self.async_abort(reason="not_loaded")
+        errors: dict[str, str] = {}
+        if user_input is not None and user_input.get("device") not in (None, RESCAN):
+            chosen = [b for b in self._beacons if b.address == user_input["device"]]
+            if chosen:
+                self._add_name = (user_input.get("name") or "").strip() or chosen[0].label
+                self._add_beacon = chosen[0]
+                return await self.async_step_add_device_run()
+        self._beacons = discovered_unprovisioned(self.hass)
+        if not self._beacons:
+            errors["base"] = "no_devices"
+            return self.async_show_form(
+                step_id="add_device", data_schema=vol.Schema({}), errors=errors
+            )
+        schema = vol.Schema(
+            {
+                vol.Required("device", default=RESCAN): SelectSelector(
+                    SelectSelectorConfig(
+                        options=[SelectOptionDict(value=RESCAN, label="🔄 Search again")]
+                        + [
+                            SelectOptionDict(value=b.address, label=b.label)
+                            for b in self._beacons
+                        ],
+                        mode=SelectSelectorMode.LIST,
+                    )
+                ),
+                vol.Optional("name", default=""): TextSelector(),
+            }
+        )
+        return self.async_show_form(step_id="add_device", data_schema=schema, errors=errors)
+
+    async def async_step_add_device_run(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Provision + configure in the background, with a progress spinner."""
+        from .provisioning import async_add_device
+
+        if self._add_task is None:
+            self._add_task = self.hass.async_create_task(
+                async_add_device(
+                    self.hass, self.config_entry, self._add_beacon, self._add_name
+                ),
+                "bluetooth_mesh add device",
+            )
+        if not self._add_task.done():
+            return self.async_show_progress(
+                step_id="add_device_run",
+                progress_action="adding",
+                progress_task=self._add_task,
+                description_placeholders={"name": self._add_name},
+            )
+        try:
+            self._add_result = self._add_task.result()
+        except Exception as exc:  # noqa: BLE001 - shown to the user
+            self._add_error = str(exc) or type(exc).__name__
+            self._add_task = None
+            return self.async_show_progress_done(next_step_id="add_device_failed")
+        self._add_task = None
+        return self.async_show_progress_done(next_step_id="add_device_done")
+
+    async def async_step_add_device_done(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        result = self._add_result or {}
+        placeholders = {
+            "name": result.get("name", self._add_name),
+            "unicast": result.get("unicast", "?"),
+            "error": result.get("error", ""),
+        }
+        if not result.get("configured"):
+            return self.async_abort(
+                reason="device_added_unconfigured",
+                description_placeholders=placeholders,
+            )
+        return self.async_abort(
+            reason="device_added_switch" if result.get("kind") == "switch"
+            else "device_added",
+            description_placeholders=placeholders,
+        )
+
+    async def async_step_add_device_failed(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return self.async_abort(
+            reason="add_device_failed",
+            description_placeholders={"error": self._add_error},
+        )
+
+    # ---------------------------------------------------------- settings
+
+    async def async_step_settings(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Show/store the keep-alive timeout."""
@@ -205,6 +512,11 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
                 data[CONF_INVERTED_CTL] = self.config_entry.options[
                     CONF_INVERTED_CTL
                 ]
+            # Not on the form: the SG switches heard on the mesh (dropping them
+            # would orphan their entities) and the SG dimmers' minimum levels.
+            for key in (CONF_SG_SWITCHES, CONF_SG_MIN_LEVEL, CONF_RETIRED_UNICASTS):
+                if key in self.config_entry.options:
+                    data[key] = self.config_entry.options[key]
             return self.async_create_entry(data=data)
 
         current = self.config_entry.options.get(
@@ -262,7 +574,7 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
                     )
                 }
             )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="settings", data_schema=schema)
 
     def _ctl_nodes(self) -> list:
         """The nodes whose colour temperature the mirror could apply to.

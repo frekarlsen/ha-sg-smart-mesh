@@ -187,6 +187,11 @@ class Provisioner:
         self.capabilities: Capabilities | None = None
         #: Optional zero-argument callback invoked when Complete is received.
         self.on_done: Callable[[], None] | None = None
+        #: Optional callback given the Capabilities as they arrive, before the
+        #: session goes on. The address is only sent in the Data PDU, later,
+        #: so this may still set :attr:`unicast_addr` — e.g. to fit the node's
+        #: element count, which is not known until now.
+        self.on_capabilities: Callable[[Capabilities], None] | None = None
 
         self._dispatch: dict[
             State, tuple[type[ProvisioningPDU], Callable[[ProvisioningPDU], None]]
@@ -271,6 +276,12 @@ class Provisioner:
         # evidence and must land in the run log whether or not we fail.
         logger.info("capabilities: %s", caps.describe())
         self.capabilities = caps
+        if self.on_capabilities is not None:
+            self.on_capabilities(caps)
+            if not 0x0001 <= self.unicast_addr <= 0x7FFF:
+                raise ProvisioningError(
+                    f"unicast_addr must be 0x0001-0x7fff, got {self.unicast_addr:#06x}"
+                )
         if not caps.algorithms & 0x0001:
             raise ProvisioningError(
                 "device does not support the FIPS P-256 Elliptic Curve algorithm; "
