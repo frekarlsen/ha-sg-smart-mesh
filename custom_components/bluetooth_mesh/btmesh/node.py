@@ -129,7 +129,9 @@ class MeshNode:
         # power cut, and the worst a replayed Status can do is show a stale
         # value for a moment. The lesser guarantee is the safer trade.
         self._last_rx_seq: dict[int, int] = {}
-        self._waiters: list[tuple[int, int, asyncio.Future[ReceivedMessage]]] = []
+        self._waiters: list[
+            tuple[int, int, Callable[[bytes], bool] | None, asyncio.Future[ReceivedMessage]]
+        ] = []
         self.received: deque[ReceivedMessage] = deque(maxlen=_RECEIVED_MAXLEN)
         self.on_message: Callable[[ReceivedMessage], None] | None = None
 
@@ -480,8 +482,13 @@ class MeshNode:
         self.received.append(msg)
         # Mesh has no correlation ID: resolve only the OLDEST matching waiter
         # so N concurrent same-(dst, opcode) requests pair FIFO with N responses.
-        for dst, opcode, fut in self._waiters:
-            if msg.src == dst and msg.opcode == opcode and not fut.done():
+        for dst, opcode, match, fut in self._waiters:
+            if (
+                msg.src == dst
+                and msg.opcode == opcode
+                and not fut.done()
+                and (match is None or match(msg.params))
+            ):
                 fut.set_result(msg)
                 break
         if self.on_message is not None:
@@ -502,11 +509,17 @@ class MeshNode:
         ttl: int = DEFAULT_TTL,
         timeout: float = 5.0,
         retries: int = 1,
+        match: Callable[[bytes], bool] | None = None,
     ) -> ReceivedMessage:
         """Send ``payload`` and await the matching response from ``dst``.
 
-        A response matches when its source is ``dst`` and its opcode equals
-        ``expected_opcode``. Mesh access messages carry no correlation ID, so
+        A response matches when its source is ``dst``, its opcode equals
+        ``expected_opcode`` and, if given, ``match(params)`` is true. The last
+        is for vendor protocols that answer everything on one opcode: an SG
+        node replies to a status, a trim read and every setting on the same
+        ``F0`` opcode, and also publishes its own changes there, so without it
+        a trim read could be resolved by a stray status. Mesh access messages
+        carry no correlation ID, so
         concurrent requests with the same ``(dst, expected_opcode)`` are
         matched to responses in FIFO order; callers that need strict
         request/response pairing must serialize such requests themselves.
@@ -518,7 +531,7 @@ class MeshNode:
         fut: asyncio.Future[ReceivedMessage] = (
             asyncio.get_running_loop().create_future()
         )
-        self._waiters.append((dst, expected_opcode, fut))
+        self._waiters.append((dst, expected_opcode, match, fut))
         try:
             for _ in range(retries + 1):
                 self.send_access(dst, payload, dev_key=dev_key, ttl=ttl)
@@ -535,4 +548,4 @@ class MeshNode:
                 f"after {retries + 1} attempts"
             )
         finally:
-            self._waiters = [w for w in self._waiters if w[2] is not fut]
+            self._waiters = [w for w in self._waiters if w[3] is not fut]

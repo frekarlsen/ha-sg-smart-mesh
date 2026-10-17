@@ -75,13 +75,26 @@ from .proxy_pdu import (
 )
 from .pump import BearerPump
 from .sg_smart import (
+    KIND_FADING,
+    KIND_PUSH_SWITCH,
+    KIND_STATUS_RESPONSE,
+    KIND_TRIM,
     OP_SG_STATUS,
     SG_STATUS_GROUP,
+    SgPushSwitchMode,
     SgStatus,
+    SgTrim,
+    SgTrimLevels,
+    is_sg_ack,
     parse_sg_status,
+    parse_sg_trim,
+    sg_fading_set,
     sg_pair_switch,
     sg_power_level_set,
+    sg_push_switch_set,
     sg_status_get,
+    sg_trim_get,
+    sg_trim_set,
 )
 
 logger = logging.getLogger(__name__)
@@ -467,11 +480,80 @@ class MeshController:
             resp = await self._node.request(
                 unicast, sg_status_get(unicast, tid=tid, seq=tid), OP_SG_STATUS,
                 timeout=timeout, retries=retries,
+                # Only the reply: a status the node publishes on its own, or a
+                # settings acknowledgement, shares the opcode.
+                match=lambda p: bool(p) and p[0] == KIND_STATUS_RESPONSE,
             )
         except TimeoutError:
             logger.debug("sg_get_status(%#06x) timed out", unicast)
             return None
         return parse_sg_status(resp.params)
+
+    async def _sg_request(
+        self, unicast: int, payload: bytes, kind: int, *,
+        timeout: float, retries: int, min_len: int = 2,
+    ) -> bytes | None:
+        """Send an SG command and await its ``KIND 01 ...`` acknowledgement."""
+        try:
+            resp = await self._node.request(
+                unicast, payload, OP_SG_STATUS, timeout=timeout, retries=retries,
+                match=lambda p: len(p) >= min_len and is_sg_ack(p, kind),
+            )
+        except TimeoutError:
+            logger.debug("SG kind %#04x to %#06x unanswered", kind, unicast)
+            return None
+        return resp.params
+
+    async def sg_get_trim(
+        self, unicast: int, *, timeout: float = 3.0, retries: int = 1
+    ) -> SgTrimLevels | None:
+        """Read a node's min / start-up / max levels; None if it stayed silent."""
+        tid = self._next_tid()
+        params = await self._sg_request(
+            unicast, sg_trim_get(unicast, tid=tid, seq=tid), KIND_TRIM,
+            timeout=timeout, retries=retries, min_len=9,
+        )
+        return None if params is None else parse_sg_trim(params)
+
+    async def sg_set_trim(
+        self, unicast: int, trim: SgTrim, percent: float, *,
+        timeout: float = 3.0, retries: int = 1,
+    ) -> bool:
+        """Write one trim level; True once the node acknowledged it.
+
+        A retransmission keeps the TID: the node drops it as a duplicate if
+        the first copy did arrive, so a lost acknowledgement costs nothing.
+        """
+        tid = self._next_tid()
+        params = await self._sg_request(
+            unicast, sg_trim_set(unicast, trim, percent, tid=tid, seq=tid), KIND_TRIM,
+            timeout=timeout, retries=retries,
+        )
+        return params is not None
+
+    async def sg_set_push_switch(
+        self, unicast: int, mode: SgPushSwitchMode, *,
+        timeout: float = 3.0, retries: int = 1,
+    ) -> bool:
+        """Choose what the node's push-button input expects; True if acked."""
+        tid = self._next_tid()
+        params = await self._sg_request(
+            unicast, sg_push_switch_set(unicast, mode, tid=tid, seq=tid),
+            KIND_PUSH_SWITCH,
+            timeout=timeout, retries=retries,
+        )
+        return params is not None
+
+    async def sg_set_fading(
+        self, unicast: int, tenths: int, *, timeout: float = 3.0, retries: int = 1,
+    ) -> bool:
+        """Set the node's fade-in time (tenths of a second); True if acked."""
+        tid = self._next_tid()
+        params = await self._sg_request(
+            unicast, sg_fading_set(unicast, tenths, tid=tid, seq=tid), KIND_FADING,
+            timeout=timeout, retries=retries,
+        )
+        return params is not None
 
     # ------------------------------------------------------------- commands
 
