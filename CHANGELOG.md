@@ -6,7 +6,34 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **SG Smart 3.0 dimmer settings**, under *Configuration* on the device page
+  and stored in the dimmer itself, so they hold for a wheel and the wall
+  button as much as for Home Assistant:
+  - minimum, start-up and maximum level (SG's trim), read from the dimmer and
+    read back after every change;
+  - the push-button input: normal push button or sensor;
+  - the fade-in time (0.5, 1, 2 or 3 s).
+  Which of them a device gets follows its product ID, as on its page in the
+  SG app; the device page also names the product (e.g. *LEDDim Smart Pill
+  Micro 3.0*). Worked out from the SG Smart app 5.0.958; see
+  `docs/sg-smart-3-protocol.md`.
+- Norwegian (Bokmål) translation.
+- `btmesh`: a request can match its reply on more than the opcode
+  (`MeshNode.request(match=...)`). An SG node answers a status read, a trim
+  read and every setting on one opcode, and publishes its own changes there
+  too; the status read now waits for the status reply rather than whatever
+  arrives first.
+
 ### Changed
+
+- The trim note in the protocol docs is corrected: the pill does honour SG's
+  trim. The 2026-09-27 test sent the minimum in whole percent where the node
+  expects half percent. The Home Assistant minimum stays, renamed
+  *Minimum level (Home Assistant)*, for loads that need more than the 40 % the
+  dimmer's own minimum allows.
+- Dimmer wheels no longer get a meaningless *Minimum level* slider.
 
 - **New integration icon**: the maintainer's SG Smart 3.0 house on red
   replaces the generated mesh-of-lights motif. `scripts/make_icon.py`, which

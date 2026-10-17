@@ -23,7 +23,8 @@ devices from Home Assistant alone.
 | | |
 | --- | --- |
 | **Dimmers** (Smart Pill 3.0) | A `light` with on/off and brightness, status read back from the dimmer — a change made at the wall or with a wheel shows up in HA. |
-| **Minimum level** | A slider on each dimmer's page. Many LED loads stay dark in the bottom of a phase dimmer's range; set the level where the lamp starts to glow and HA's 1–100 % is spread over what actually lights. |
+| **Dimmer settings** | Under *Configuration* on each dimmer's page, stored in the dimmer itself so they hold for a wheel and the wall button too: minimum level, start-up level (a short kick for a cold lamp) and maximum level, read from the dimmer; the push-button input (normal push button or sensor) and the fade-in time. Which ones a device gets follows its product, as in the SG app. |
+| **Minimum level (Home Assistant)** | A second minimum, applied by HA, for loads that stay dark above the 40 % the dimmer's own minimum allows: HA's 1–100 % is spread over what actually lights. |
 | **Dimmer wheels / switches** | An `event` entity (`press`, `hold`, `rotate_up`, `rotate_down` with `steps`) for automations, and a **battery voltage** sensor. |
 | **Direct pairing** | A wheel paired to a dimmer drives it **directly** over the mesh — no gateway, and no Home Assistant in the loop, so it keeps working if HA is down. HA still sees both sides. |
 | **Device management** | Add (provision), pair / unpair, remove (factory reset over the mesh) and back up — all from the integration's **Configure** menu. |
@@ -81,10 +82,12 @@ device or reverse-engineering further.
 
 ### Known limits
 
-- The dimmer ignores SG's own trim (min/max level) command, so the minimum level
-  is applied by Home Assistant. A wheel still dims the dimmer over its whole
-  range; below the minimum HA shows 1 %.
-- Tested on a LEDDim Smart Pill 3.0 (product `0x00A2`) and SG Smart Wireless 3.0
+- The dimmer's own minimum goes up to 40 % (as in the SG app). A load that
+  needs more keeps the Home Assistant minimum on top, which a wheel does not
+  see: below it HA shows 1 %.
+- The push-button input and fade-in cannot be read back from the dimmer, so HA
+  shows the value it last wrote (unknown until then).
+- Tested on a LEDDim Smart Pill Micro 3.0 (product `0x00A2`) and SG Smart Wireless 3.0
   dimmer wheels. Other SG Smart 3.0 devices (tunable white, RGBW, DIN, drivers)
   speak the same vendor protocol but have not been tried — reports welcome.
 - Scenes stored in SG devices are not exposed; use Home Assistant scenes.
@@ -93,8 +96,9 @@ device or reverse-engineering further.
 
 SG Smart 3.0 devices are standard Bluetooth SIG Mesh nodes (Telink stack,
 company ID `0x0EE8`) that do almost everything through one vendor model. The
-protocol — power/level, status, switch pairing, button events, trim — is
-documented in [docs/sg-smart-3-protocol.md](docs/sg-smart-3-protocol.md).
+protocol — power/level, status, switch pairing, button events, device
+settings, product IDs — is documented in
+[docs/sg-smart-3-protocol.md](docs/sg-smart-3-protocol.md).
 
 A notable fix on the way, which also applies upstream: proxy configuration
 messages (the proxy filter) must be encrypted with the **proxy nonce**
