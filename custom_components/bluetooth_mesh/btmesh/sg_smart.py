@@ -287,7 +287,11 @@ def parse_sg_button_event(params: bytes) -> SgButtonEvent | None:
 
 
 def is_sg_ack(params: bytes, kind: int) -> bool:
-    """Whether ``OP_SG_STATUS`` parameters acknowledge a command of ``kind``."""
+    """Whether ``OP_SG_STATUS`` parameters accept a command of ``kind``.
+
+    The second byte is the outcome: ``01`` accepted, ``02`` refused (a node
+    answered a 6 s fade-in, beyond the app's 3 s, with ``0e 02 ...``).
+    """
     return len(params) >= 2 and params[0] == kind and params[1] == 0x01
 
 
@@ -409,7 +413,8 @@ def sg_push_switch_set(
 # --- fading when switched on (kind 0x0E)
 
 KIND_FADING = 0x0E
-# The app's choices, in tenths of a second (0.5, 1, 2 and 3 s).
+# The app's choices, in tenths of a second (0.5, 1, 2 and 3 s). Nothing longer:
+# a pill refused 6 s (``0e 02 29 29 7fff 3c 01``, 2026-10-17).
 SG_FADING_TENTHS = (5, 10, 20, 30)
 
 

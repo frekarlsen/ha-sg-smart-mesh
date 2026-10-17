@@ -137,8 +137,10 @@ Examples: press `2A 0A 01 00 04 1D 04 01 01 00 00 00 00`; a fast turn up
 
 Worked out from the SG Smart app 5.0.958 (arm64, decompiled with blutter) on
 2026-10-17. They hold for a wheel and the wall button as much as for Home
-Assistant. A node acknowledges each with `KIND 01 TID SEQ ADDR_HI ADDR_LO …`
-on `0xF0`, `ADDR` being whoever asked.
+Assistant. A node answers each with `KIND STATUS TID SEQ ADDR_HI ADDR_LO …` on
+`0xF0`, `ADDR` being whoever asked and the parameters echoed after it.
+`STATUS` is `01` accepted, `02` refused: a fade-in of 6 s, twice the app's
+longest, was answered `0e 02 29 29 7fff 3c 01` (2026-10-17).
 
 ### Trim — kind `0x06` (verified)
 

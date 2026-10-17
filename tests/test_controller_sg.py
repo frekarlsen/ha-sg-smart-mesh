@@ -56,8 +56,11 @@ def make_pill(*, answer: bool = True):
         elif kind == 0x06:
             trim[msg.params[5]] = msg.params[6]
             reply(msg.src, bytes([0x06, 0x01, tid, seq]) + addr)
+        elif kind == 0x0E and msg.params[5] > 30:
+            # Refused, as a pill answered a 6 s fade-in.
+            reply(msg.src, bytes([kind, 0x02, tid, seq]) + addr + msg.params[5:])
         elif kind in (0x0D, 0x0E):
-            reply(msg.src, bytes([kind, 0x01, tid, seq]) + addr)
+            reply(msg.src, bytes([kind, 0x01, tid, seq]) + addr + msg.params[5:])
 
     device.on_message = responder
     bearer.device = device
@@ -109,3 +112,19 @@ async def test_silent_node_reads_none_and_writes_false(pill):
     assert not await controller.sg_set_trim(
         UNICAST, SgTrim.MAX, 80, timeout=0.05, retries=0
     )
+
+
+async def test_a_refused_setting_is_false_at_once(pill):
+    """Status 02 is a refusal: reported as such, not waited out as silence."""
+    import time
+
+    from btmesh import sg_smart
+
+    controller, _, _ = await pill()
+    payload = sg_smart.sg_fading_set(UNICAST, 30, tid=0x29, seq=0x29)
+    payload = payload[:-2] + bytes([60, 0x01])  # 6 s, beyond what the app sends
+    started = time.monotonic()
+    assert not await controller._sg_set(
+        UNICAST, payload, sg_smart.KIND_FADING, timeout=1.0, retries=1
+    )
+    assert time.monotonic() - started < 0.5

@@ -493,16 +493,39 @@ class MeshController:
         self, unicast: int, payload: bytes, kind: int, *,
         timeout: float, retries: int, min_len: int = 2,
     ) -> bytes | None:
-        """Send an SG command and await its ``KIND 01 ...`` acknowledgement."""
+        """Send an SG command and await its ``KIND STATUS ...`` answer.
+
+        The answer is matched on the kind alone, whatever its status byte: a
+        node refuses a value it does not take with ``02`` (a 6 s fade-in, on
+        2026-10-17), and waiting for an ``01`` that never comes would turn a
+        clear refusal into a timeout.
+        """
         try:
             resp = await self._node.request(
                 unicast, payload, OP_SG_STATUS, timeout=timeout, retries=retries,
-                match=lambda p: len(p) >= min_len and is_sg_ack(p, kind),
+                match=lambda p: len(p) >= min_len and p[0] == kind,
             )
         except TimeoutError:
             logger.debug("SG kind %#04x to %#06x unanswered", kind, unicast)
             return None
         return resp.params
+
+    async def _sg_set(
+        self, unicast: int, payload: bytes, kind: int, *,
+        timeout: float, retries: int,
+    ) -> bool:
+        """Send an SG setting; True only if the node accepted it (status 01)."""
+        params = await self._sg_request(
+            unicast, payload, kind, timeout=timeout, retries=retries
+        )
+        if params is None:
+            return False
+        if not is_sg_ack(params, kind):
+            logger.debug(
+                "SG kind %#04x refused by %#06x: %s", kind, unicast, params.hex()
+            )
+            return False
+        return True
 
     async def sg_get_trim(
         self, unicast: int, *, timeout: float = 3.0, retries: int = 1
@@ -525,11 +548,10 @@ class MeshController:
         the first copy did arrive, so a lost acknowledgement costs nothing.
         """
         tid = self._next_tid()
-        params = await self._sg_request(
+        return await self._sg_set(
             unicast, sg_trim_set(unicast, trim, percent, tid=tid, seq=tid), KIND_TRIM,
             timeout=timeout, retries=retries,
         )
-        return params is not None
 
     async def sg_set_push_switch(
         self, unicast: int, mode: SgPushSwitchMode, *,
@@ -537,23 +559,21 @@ class MeshController:
     ) -> bool:
         """Choose what the node's push-button input expects; True if acked."""
         tid = self._next_tid()
-        params = await self._sg_request(
+        return await self._sg_set(
             unicast, sg_push_switch_set(unicast, mode, tid=tid, seq=tid),
             KIND_PUSH_SWITCH,
             timeout=timeout, retries=retries,
         )
-        return params is not None
 
     async def sg_set_fading(
         self, unicast: int, tenths: int, *, timeout: float = 3.0, retries: int = 1,
     ) -> bool:
         """Set the node's fade-in time (tenths of a second); True if acked."""
         tid = self._next_tid()
-        params = await self._sg_request(
+        return await self._sg_set(
             unicast, sg_fading_set(unicast, tenths, tid=tid, seq=tid), KIND_FADING,
             timeout=timeout, retries=retries,
         )
-        return params is not None
 
     # ------------------------------------------------------------- commands
 
