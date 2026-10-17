@@ -20,8 +20,8 @@ import asyncio
 import copy
 import json
 import logging
-from time import monotonic
 from dataclasses import dataclass
+from time import monotonic
 from typing import Callable
 
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection

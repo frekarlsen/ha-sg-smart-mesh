@@ -39,10 +39,10 @@ from .btmesh.network_model import Network, NetworkModelError
 from .const import (
     CONF_CONNECT_JSON,
     CONF_INVERTED_CTL,
+    CONF_KEEPALIVE,
     CONF_RETIRED_UNICASTS,
     CONF_SG_MIN_LEVEL,
     CONF_SG_SWITCHES,
-    CONF_KEEPALIVE,
     CONF_SRC_ADDR,
     DEFAULT_KEEPALIVE,
     DEFAULT_SRC_ADDR,
@@ -267,7 +267,7 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
             return SelectSelector(config)
 
         def units(pairs):
-            return [SelectOptionDict(value=f"{u:04x}", label=l) for u, l in pairs]
+            return [SelectOptionDict(value=f"{u:04x}", label=name) for u, name in pairs]
 
         commands = ["toggle_on_off", "on", "off", "dim", "dim_up", "dim_down", "none"]
         schema = vol.Schema(

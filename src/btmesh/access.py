@@ -19,7 +19,6 @@ __all__ = [
     "OP_CONFIG_APPKEY_ADD",
     "OP_CONFIG_NODE_RESET",
     "OP_CONFIG_NODE_RESET_STATUS",
-    "config_node_reset",
     "OP_CONFIG_COMPOSITION_DATA_STATUS",
     "OP_CONFIG_APPKEY_STATUS",
     "OP_CONFIG_COMPOSITION_DATA_GET",
@@ -409,11 +408,6 @@ def _unpack_key_indexes(data: bytes) -> tuple[int, int]:
 
 
 # ------------------------------------------------------------------ encoders
-
-
-def config_node_reset() -> bytes:
-    """Config Node Reset access payload (no parameters; device key)."""
-    return encode_opcode(OP_CONFIG_NODE_RESET)
 
 
 def config_appkey_add(netkey_idx: int, appkey_idx: int, appkey: bytes) -> bytes:
