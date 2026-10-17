@@ -137,7 +137,8 @@ Examples: press `2A 0A 01 00 04 1D 04 01 01 00 00 00 00`; a fast turn up
 
 Worked out from the SG Smart app 5.0.958 (arm64, decompiled with blutter) on
 2026-10-17. They hold for a wheel and the wall button as much as for Home
-Assistant. A node acknowledges each with `KIND 01 TID SEQ …` on `0xF0`.
+Assistant. A node acknowledges each with `KIND 01 TID SEQ ADDR_HI ADDR_LO …`
+on `0xF0`, `ADDR` being whoever asked.
 
 ### Trim — kind `0x06` (verified)
 
@@ -183,6 +184,15 @@ There is no command to read it back.
 and 30 (two of those, 5 and 30, for the colour controllers). The last byte is
 always `01`: the "slider responsiveness" the app logs next to it never reaches
 a 3.0 node. No read-back.
+
+Acknowledged (2026-10-17, pill `0x0008`): `0e 25 25 0008 1e 01` was answered
+`0e 01 25 25 7fff 1e 01` — kind, `01`, TID, SEQ, the asker's address, then the
+parameters echoed. Turning the lamp on with a paired wheel then sent its `03`
+status about 2.2 s after the press, at level 1 %: a fade up to 1 % is not
+something one sees, so the fade itself still wants a check from a high level.
+
+The dimmer also published `2d TID SEQ 0007 00` right after acting on a press
+from wheel `0x0007` (meaning of the last byte unknown).
 
 ### Mode — kind `0x01` (not used by this integration)
 
