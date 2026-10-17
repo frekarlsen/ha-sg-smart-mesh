@@ -147,6 +147,12 @@
       },
       "sg_battery_voltage": {
         "name": "Battery voltage"
+      },
+      "sg_paired_switches": {
+        "name": "Controlled by"
+      },
+      "sg_switch_targets": {
+        "name": "Controls"
       }
     },
     "event": {

@@ -147,6 +147,12 @@
       },
       "sg_battery_voltage": {
         "name": "Batterispenning"
+      },
+      "sg_paired_switches": {
+        "name": "Styres av"
+      },
+      "sg_switch_targets": {
+        "name": "Styrer"
       }
     },
     "event": {

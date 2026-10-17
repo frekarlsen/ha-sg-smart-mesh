@@ -147,6 +147,12 @@
       },
       "sg_battery_voltage": {
         "name": "Tension de la pile"
+      },
+      "sg_paired_switches": {
+        "name": "Commandé par"
+      },
+      "sg_switch_targets": {
+        "name": "Commande"
       }
     },
     "event": {

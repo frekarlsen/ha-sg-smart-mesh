@@ -51,10 +51,12 @@ from .btmesh.network_model import UNICAST_MAX, UNICAST_MIN, Network
 from .btmesh.sg_smart import (
     OP_SG_STATUS,
     SG_STATUS_GROUP,
+    SG_SWITCH_TABLE_PAGES,
     SG_VENDOR_MODEL_ID,
     SgButtonEvent,
     SgPushSwitchMode,
     SgStatus,
+    SgSwitchPairing,
     SgTrim,
     SgTrimLevels,
     parse_sg_button_event,
@@ -105,6 +107,10 @@ SIGNAL_NEW_SG_SWITCH = "bluetooth_mesh_new_sg_switch_{}"
 # Dispatcher signal (entry id, unicast) when an SG dimmer's minimum level
 # changes; carries (old, new) so the light can keep its apparent brightness.
 SIGNAL_SG_MIN_LEVEL = "bluetooth_mesh_sg_min_level_{}_{}"
+
+# Dispatcher signal (entry id) when a dimmer's switch table has been read, so
+# the "controlled by" / "controls" sensors on both ends of a pairing update.
+SIGNAL_SG_PAIRINGS = "bluetooth_mesh_sg_pairings_{}"
 
 # Dispatcher signal (entry id, unicast) when an SG node's trim levels have been
 # read (or re-read after a write), so its three number entities update.
@@ -344,6 +350,11 @@ class MeshCoordinator:
         # three number entities ask at once and one read answers them all.
         self._sg_trim: dict[int, SgTrimLevels] = {}
         self._sg_trim_reads: dict[int, asyncio.Task] = {}
+        # Each dimmer's switch table as last read (the dimmer is the record of
+        # what is paired, the SG app's pairings included), and the read in
+        # flight per dimmer.
+        self._sg_pairings: dict[int, list[SgSwitchPairing]] = {}
+        self._sg_pairing_reads: dict[int, asyncio.Task] = {}
 
     # ------------------------------------------------ derived from the export
 
@@ -546,9 +557,10 @@ class MeshCoordinator:
         self._stopped = True
         self._cancel_probe()
         self._cancel_idle()
-        for task in self._sg_trim_reads.values():
+        for task in (*self._sg_trim_reads.values(), *self._sg_pairing_reads.values()):
             task.cancel()
         self._sg_trim_reads.clear()
+        self._sg_pairing_reads.clear()
         if self._discovery_unsub is not None:
             self._discovery_unsub()
             self._discovery_unsub = None
@@ -1208,7 +1220,61 @@ class MeshCoordinator:
             )
             return not controller.failed
 
-        return bool(await self._run_connected(send))
+        sent = bool(await self._run_connected(send))
+        if sent:
+            # Show what the dimmer now holds rather than what was asked.
+            self.async_request_sg_pairings(node, force=True)
+        return sent
+
+    # ------------------------------------------------ SG switch tables
+
+    def sg_pairings(self, dimmer: int) -> list[SgSwitchPairing] | None:
+        """The switches ``dimmer`` reacts to, as last read; None if never read."""
+        return self._sg_pairings.get(dimmer)
+
+    def sg_switch_targets(self, switch: int) -> list[tuple[int, SgSwitchPairing]]:
+        """Every (dimmer, entry) whose table holds ``switch``, as last read."""
+        return [
+            (dimmer, pairing)
+            for dimmer, pairings in sorted(self._sg_pairings.items())
+            for pairing in pairings
+            if pairing.switch == switch
+        ]
+
+    @callback
+    def async_request_sg_pairings(self, dimmer: int, *, force: bool = False) -> None:
+        """Read ``dimmer``'s switch table in the background (once, unless forced)."""
+        task = self._sg_pairing_reads.get(dimmer)
+        if task is not None and not task.done():
+            return
+        if not force and dimmer in self._sg_pairings:
+            return
+        self._sg_pairing_reads[dimmer] = self.hass.async_create_background_task(
+            self._async_read_sg_pairings(dimmer),
+            f"bluetooth_mesh sg pairings {dimmer:04x}",
+        )
+
+    async def _async_read_sg_pairings(self, dimmer: int) -> None:
+        pairings: list[SgSwitchPairing] = []
+        for page in range(1, SG_SWITCH_TABLE_PAGES + 1):
+            # One page per command: the held link is shared with everything
+            # else, and a page is a multi-segment answer of its own.
+            entries = await self._run_connected(
+                lambda c, page=page: c.sg_get_switch_page(
+                    dimmer, page, timeout=STATUS_TIMEOUT * 2
+                )
+            )
+            if entries is None:
+                if page == 1:
+                    return  # unanswered: keep what was known
+                break
+            pairings.extend(entries)
+            if not entries:
+                break  # the table fills from the front; an empty page ends it
+        self._sg_pairings[dimmer] = pairings
+        async_dispatcher_send(
+            self.hass, SIGNAL_SG_PAIRINGS.format(self.entry.entry_id)
+        )
 
     def sg_min_level(self, unicast: int) -> int:
         """Lowest SG level (%) that lights ``unicast``'s load; 0 = none set."""

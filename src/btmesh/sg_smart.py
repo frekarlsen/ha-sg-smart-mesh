@@ -68,6 +68,12 @@ __all__ = [
     "is_sg_ack",
     "SgProduct",
     "sg_product",
+    "KIND_SWITCH_TABLE",
+    "SG_SWITCH_TABLE_PAGES",
+    "SgButtonActions",
+    "SgSwitchPairing",
+    "sg_switch_table_get",
+    "parse_sg_switch_table",
 ]
 
 SG_COMPANY_ID = 0x0EE8
@@ -272,6 +278,93 @@ def parse_sg_button_event(params: bytes) -> SgButtonEvent | None:
         action=params[7],
         values=bytes(params[8:]),
     )
+
+
+# ------------------------------------------------------- the switch table
+#
+# A node keeps the switches it reacts to in a table of 8 pages of 4 entries
+# (``RequestSigMeshControllerSettingsTask``, which the app only runs from its
+# hidden debug page). Read one page at a time:
+#
+#     3A TID SEQ NODE_HI NODE_LO FF FF PAGE        (PAGE 1..8)
+#
+# The answer is ``3A 01 TID SEQ ADDR_HI ADDR_LO PAGE`` followed by up to four
+# 54-byte entries: the switch, a second address the app prints as "to", and
+# five buttons of five (command, target) pairs — short press, long press,
+# double press, long-press release, rotation — with the commands of
+# ``SgSwitchCommand``.
+
+KIND_SWITCH_TABLE = 0x3A
+SG_SWITCH_TABLE_PAGES = 8
+_TABLE_HEADER = 7
+_TABLE_ENTRY = 54
+_TABLE_BUTTONS = 5
+_TABLE_BUTTON = 10
+
+
+class SgButtonActions(NamedTuple):
+    """What one switch button makes the node do; each is (command, target)."""
+
+    press: tuple[int, int]
+    hold: tuple[int, int]
+    double_press: tuple[int, int]
+    hold_release: tuple[int, int]
+    rotate: tuple[int, int]
+
+    @property
+    def used(self) -> bool:
+        return any(command != SgSwitchCommand.NONE for command, _ in self)
+
+
+class SgSwitchPairing(NamedTuple):
+    """One entry of a node's switch table."""
+
+    switch: int
+    target: int  # the second address the app prints as "to"
+    buttons: dict[int, SgButtonActions]  # button index -> actions, used only
+
+
+def sg_switch_table_get(unicast: int, page: int, *, tid: int, seq: int) -> bytes:
+    """Access payload asking ``unicast`` for one page (1..8) of its switch table."""
+    if not 1 <= page <= SG_SWITCH_TABLE_PAGES:
+        raise ValueError(f"switch table page must be 1..{SG_SWITCH_TABLE_PAGES}")
+    return (
+        _opcode_bytes(_OP_BYTE_COMMAND)
+        + _header(KIND_SWITCH_TABLE, unicast, tid, seq)
+        + bytes([0xFF, 0xFF, page])
+    )
+
+
+def parse_sg_switch_table(params: bytes, page: int) -> list[SgSwitchPairing] | None:
+    """The used entries of one switch-table page; None if not that page's answer."""
+    if (
+        len(params) < _TABLE_HEADER
+        or not is_sg_ack(params, KIND_SWITCH_TABLE)
+        or params[6] != page
+    ):
+        return None
+    pairings = []
+    body = params[_TABLE_HEADER:]
+    for start in range(0, len(body) - _TABLE_ENTRY + 1, _TABLE_ENTRY):
+        entry = body[start : start + _TABLE_ENTRY]
+        switch = int.from_bytes(entry[0:2], "big")
+        if switch in (0x0000, 0xFFFF):
+            continue
+        buttons = {}
+        for index in range(_TABLE_BUTTONS):
+            raw = entry[4 + index * _TABLE_BUTTON : 4 + (index + 1) * _TABLE_BUTTON]
+            actions = SgButtonActions(*(tuple(raw[i : i + 2]) for i in range(0, 10, 2)))
+            if actions.used:
+                buttons[index] = actions
+        if buttons:
+            pairings.append(
+                SgSwitchPairing(
+                    switch=switch,
+                    target=int.from_bytes(entry[2:4], "big"),
+                    buttons=buttons,
+                )
+            )
+    return pairings
 
 
 # ------------------------------------------------------------ device settings

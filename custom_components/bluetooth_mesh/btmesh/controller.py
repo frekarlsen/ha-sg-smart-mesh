@@ -78,21 +78,25 @@ from .sg_smart import (
     KIND_FADING,
     KIND_PUSH_SWITCH,
     KIND_STATUS_RESPONSE,
+    KIND_SWITCH_TABLE,
     KIND_TRIM,
     OP_SG_STATUS,
     SG_STATUS_GROUP,
     SgPushSwitchMode,
     SgStatus,
+    SgSwitchPairing,
     SgTrim,
     SgTrimLevels,
     is_sg_ack,
     parse_sg_status,
+    parse_sg_switch_table,
     parse_sg_trim,
     sg_fading_set,
     sg_pair_switch,
     sg_power_level_set,
     sg_push_switch_set,
     sg_status_get,
+    sg_switch_table_get,
     sg_trim_get,
     sg_trim_set,
 )
@@ -537,6 +541,27 @@ class MeshController:
             timeout=timeout, retries=retries, min_len=9,
         )
         return None if params is None else parse_sg_trim(params)
+
+    async def sg_get_switch_page(
+        self, unicast: int, page: int, *, timeout: float = 3.0, retries: int = 1
+    ) -> list[SgSwitchPairing] | None:
+        """One page (1..8) of the switches ``unicast`` reacts to; None if silent.
+
+        The answer runs to several segments (four 54-byte entries), so give it
+        a little longer than a status.
+        """
+        tid = self._next_tid()
+        try:
+            resp = await self._node.request(
+                unicast, sg_switch_table_get(unicast, page, tid=tid, seq=tid),
+                OP_SG_STATUS, timeout=timeout, retries=retries,
+                match=lambda p: len(p) >= 7 and p[0] == KIND_SWITCH_TABLE
+                and p[6] == page,
+            )
+        except TimeoutError:
+            logger.debug("switch table page %d of %#06x unanswered", page, unicast)
+            return None
+        return parse_sg_switch_table(resp.params, page)
 
     async def sg_set_trim(
         self, unicast: int, trim: SgTrim, percent: float, *,
