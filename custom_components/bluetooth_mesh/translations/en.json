@@ -1,5 +1,5 @@
 {
-  "title": "Bluetooth Mesh",
+  "title": "SG Smart 3.0",
   "config": {
     "step": {
       "user": {
@@ -36,7 +36,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Bluetooth Mesh",
+        "title": "SG Smart 3.0",
         "description": "What do you want to do?",
         "menu_options": {
           "add_device": "Add a device",
@@ -47,7 +47,7 @@
         }
       },
       "settings": {
-        "title": "Bluetooth Mesh options",
+        "title": "SG Smart 3.0 options",
         "description": "A mesh lamp offers a single Bluetooth proxy connection slot. Keeping it open makes commands instant, but prevents the Häfele Connect Mesh app from connecting to the lamp while this integration is loaded.",
         "data": {
           "inverted_ctl": "Lamps with inverted colour temperature",

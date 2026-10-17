@@ -1,5 +1,5 @@
 {
-  "title": "Bluetooth Mesh",
+  "title": "SG Smart 3.0",
   "config": {
     "step": {
       "user": {
@@ -36,7 +36,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Bluetooth Mesh",
+        "title": "SG Smart 3.0",
         "description": "Que voulez-vous faire ?",
         "menu_options": {
           "add_device": "Ajouter un appareil",
@@ -47,7 +47,7 @@
         }
       },
       "settings": {
-        "title": "Options Bluetooth Mesh",
+        "title": "Options SG Smart 3.0",
         "description": "Une lampe mesh n'offre qu'un seul emplacement de connexion proxy Bluetooth. Le garder ouvert rend les commandes instantanées, mais empêche l'application Häfele Connect Mesh de se connecter à la lampe tant que cette intégration est chargée.",
         "data": {
           "inverted_ctl": "Lampes à température de couleur inversée",

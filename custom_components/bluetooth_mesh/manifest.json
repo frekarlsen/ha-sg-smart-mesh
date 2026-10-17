@@ -1,6 +1,6 @@
 {
   "domain": "bluetooth_mesh",
-  "name": "SG Smart 3.0 (Bluetooth Mesh)",
+  "name": "SG Smart 3.0",
   "codeowners": [
     "@frekarlsen"
   ],

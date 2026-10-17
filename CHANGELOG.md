@@ -28,6 +28,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Shown as "SG Smart 3.0"** in Home Assistant (integration page, Configure
+  menu, HACS) instead of "Bluetooth Mesh". The domain stays `bluetooth_mesh`:
+  changing it would mean removing and re-adding the integration, with new
+  entity ids. A dimmer wheel's device page names its product too (*Smart
+  Wireless 3.0*).
 - The trim note in the protocol docs is corrected: the pill does honour SG's
   trim. The 2026-09-27 test sent the minimum in whole percent where the node
   expects half percent. The Home Assistant minimum stays, renamed
