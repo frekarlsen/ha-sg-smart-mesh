@@ -39,9 +39,6 @@ from .btmesh.network_model import Network, NetworkModelError
 from .const import (
     CONF_CONNECT_JSON,
     CONF_INVERTED_CTL,
-    CONF_RETIRED_UNICASTS,
-    CONF_SG_MIN_LEVEL,
-    CONF_SG_SWITCHES,
     CONF_KEEPALIVE,
     CONF_SRC_ADDR,
     DEFAULT_KEEPALIVE,
@@ -202,22 +199,30 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
 
     def _sg_nodes(self):
         """(dimmers, switches) as (unicast, label) lists, from the live network."""
+        from .sg_settings import device_name, sg_nodes
+
         coordinator = self.config_entry.runtime_data
         known_switches = set(coordinator.sg_switches)
+        outputs = {node.unicast for node, _ in sg_nodes(coordinator)}
         dimmers, switches = [], []
         for node in coordinator.network.nodes:
-            label = f"{node.name or 'SG Smart'} ({node.unicast:04x})"
-            if node.unicast in known_switches:
-                switches.append((node.unicast, label))
-            elif node.has_model(MODEL_SG_VENDOR):
+            # As the device page names it: a rename in Home Assistant is what
+            # the user knows the device by, not the name in the export.
+            name = device_name(self.hass, coordinator, node.unicast)
+            label = f"{name} ({node.unicast:04x})"
+            if node.unicast in outputs:
                 dimmers.append((node.unicast, label))
+            elif node.unicast in known_switches or node.has_model(MODEL_SG_VENDOR):
+                # Heard as a switch, or an SG node whose product is one.
+                switches.append((node.unicast, label))
             elif node.cid in (0, 0x0EE8):
                 # Not configured through HA yet (e.g. added with nRF Mesh):
                 # no composition stored, so it could be a switch.
                 switches.append((node.unicast, label))
         listed = {u for u, _ in switches} | {u for u, _ in dimmers}
         for unicast in sorted(known_switches - listed):
-            switches.append((unicast, f"SG Smart switch ({unicast:04x})"))
+            name = device_name(self.hass, coordinator, unicast)
+            switches.append((unicast, f"{name} ({unicast:04x})"))
         return dimmers, switches
 
     async def async_step_pair_switch(
@@ -234,6 +239,7 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
         if not dimmers or not switches:
             return self.async_abort(reason="nothing_to_pair")
 
+        names = dict(dimmers) | dict(switches)
         errors: dict[str, str] = {}
         if user_input is not None:
             node = int(user_input["node"], 16)
@@ -248,7 +254,6 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
                 node, switch, 4, press=press, hold=hold, rotate=rotate
             )
             if ok:
-                names = dict(dimmers) | dict(switches)
                 return self.async_abort(
                     reason="unpaired" if user_input["mode"] == "unpair" else "paired",
                     description_placeholders={
@@ -267,7 +272,7 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
             return SelectSelector(config)
 
         def units(pairs):
-            return [SelectOptionDict(value=f"{u:04x}", label=l) for u, l in pairs]
+            return [SelectOptionDict(value=f"{u:04x}", label=name) for u, name in pairs]
 
         commands = ["toggle_on_off", "on", "off", "dim", "dim_up", "dim_down", "none"]
         schema = vol.Schema(
@@ -280,8 +285,23 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
                 vol.Required("hold", default="none"): select(commands, "switch_command"),
             }
         )
+        # What is paired already, so a second wheel is not paired blind and an
+        # unpair can be picked from what exists. Home Assistant's own record:
+        # the dimmers do not answer a read of their table (see
+        # ``MeshCoordinator.sg_pairings_sent``).
+        paired = sorted(
+            {(p.switch, p.node) for p in coordinator.sg_pairings_sent},
+            key=lambda pair: (names.get(pair[0], ""), names.get(pair[1], "")),
+        )
+        listing = "\n".join(
+            f"- {names.get(s, f'{s:04x}')} → {names.get(n, f'{n:04x}')}"
+            for s, n in paired
+        )
         return self.async_show_form(
-            step_id="pair_switch", data_schema=schema, errors=errors
+            step_id="pair_switch",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={"pairings": listing or "–"},
         )
 
     # ----------------------------------------------------- remove device
@@ -508,15 +528,14 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
                         if address not in listed
                     }
                 )
-            elif CONF_INVERTED_CTL in self.config_entry.options:
-                data[CONF_INVERTED_CTL] = self.config_entry.options[
-                    CONF_INVERTED_CTL
-                ]
-            # Not on the form: the SG switches heard on the mesh (dropping them
-            # would orphan their entities) and the SG dimmers' minimum levels.
-            for key in (CONF_SG_SWITCHES, CONF_SG_MIN_LEVEL, CONF_RETIRED_UNICASTS):
-                if key in self.config_entry.options:
-                    data[key] = self.config_entry.options[key]
+            # Everything not on this form is carried through (the stored
+            # inverted-CTL list too, when the form had no such field): this
+            # replaces the whole options dict, and the rest is state kept
+            # there, from the switches heard to the SG settings and pairings
+            # sent. It used to copy a list of keys, and every key added after
+            # the list was written was dropped on save: the fade-in and
+            # push-input values of 0.12.0rc2 went that way.
+            data = {**self.config_entry.options, **data}
             return self.async_create_entry(data=data)
 
         current = self.config_entry.options.get(

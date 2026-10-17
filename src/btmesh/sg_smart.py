@@ -52,6 +52,22 @@ __all__ = [
     "SG_ACTION_PRESS",
     "SG_ACTION_HOLD",
     "SG_ACTION_ROTATE",
+    "KIND_TRIM",
+    "KIND_PUSH_SWITCH",
+    "KIND_FADING",
+    "SgTrim",
+    "SgTrimLevels",
+    "SG_TRIM_RANGES",
+    "sg_trim_get",
+    "sg_trim_set",
+    "parse_sg_trim",
+    "SgPushSwitchMode",
+    "sg_push_switch_set",
+    "SG_FADING_TENTHS",
+    "sg_fading_set",
+    "is_sg_ack",
+    "SgProduct",
+    "sg_product",
 ]
 
 SG_COMPANY_ID = 0x0EE8
@@ -149,7 +165,9 @@ def parse_sg_status(params: bytes) -> SgStatus | None:
 # node that should react (``SetControllerSwitchTask`` / ``SigSwitchCommandData``
 # in the app). Verified 2026-09-27: wheel 0x0004 -> pill 0x0003,
 # ``13 TID SEQ 0003 0004 04 0aff ffff 0bff 0bff`` gives press = on/off, turning
-# the wheel = dim up/down, hold = nothing.
+# the wheel = dim up/down, hold = nothing. Reading the table back (kind 0x3A,
+# from the app's debug page) went unanswered on firmware 0x0041; see the
+# protocol notes.
 
 _KIND_PAIR_SWITCH = 0x13
 KIND_BUTTON_EVENT = 0x2A
@@ -256,3 +274,225 @@ def parse_sg_button_event(params: bytes) -> SgButtonEvent | None:
         action=params[7],
         values=bytes(params[8:]),
     )
+
+
+# ------------------------------------------------------------ device settings
+#
+# Settings a node stores itself, so they hold for a wheel or the wall button
+# as much as for Home Assistant. Worked out from the SG Smart app 5.0.958
+# (``DeviceManager.sendSetSigMeshDeviceTrimLevelCommand``,
+# ``sendRequestSigMeshDeviceTrimLevelCommand``,
+# ``RequestTrimLevelTask.handleSigMeshTrimLevelResponse``,
+# ``sendSetSigMeshDeviceExternalPushSwitchCommand``,
+# ``sendSetSigMeshDeviceFadingTimeCommand``). Every one is acknowledged by the
+# node with ``KIND 01 TID SEQ ...`` on ``OP_SG_STATUS``.
+
+
+def is_sg_ack(params: bytes, kind: int) -> bool:
+    """Whether ``OP_SG_STATUS`` parameters accept a command of ``kind``.
+
+    The second byte is the outcome: ``01`` accepted, ``02`` refused (a node
+    answered a 6 s fade-in, beyond the app's 3 s, with ``0e 02 ...``).
+    """
+    return len(params) >= 2 and params[0] == kind and params[1] == 0x01
+
+
+# --- trim: minimum, start-up and maximum level (kind 0x06)
+#
+# The 27 September test that concluded the pill ignores trim wrote 35, 50 and
+# 128 as raw bytes. The minimum travels in HALF percent, so that was 17.5 %,
+# 25 % (both still dark on a load that lights at ~50 %) and 64 %, which is
+# beyond the 40 % the app ever sends. Read back on 17 October from pill 0x0008
+# (LEDDim Smart Pill Micro 3.0): ``06 01 21 21 7f ff 14 3c 64`` = min 10 %,
+# start-up 30 %, max 100 % (the factory values), and a max of 50 % visibly
+# capped the lamp. Trim works.
+
+KIND_TRIM = 0x06
+_TRIM_READ = 0x04
+
+
+class SgTrim(IntEnum):
+    """Which trim level a Set writes (the TYPE byte)."""
+
+    MIN = 0x01  # what 1 % is mapped to
+    START_UP = 0x02  # a short kick when a cold lamp is switched on
+    MAX = 0x03  # what 100 % is mapped to
+
+
+# The ranges the app offers, in percent. The node's own limits are unknown, so
+# nothing outside what the app sends is ever written (64 % as a minimum was
+# silently ignored, see above).
+SG_TRIM_RANGES = {
+    SgTrim.MIN: (0.5, 40.0),
+    SgTrim.START_UP: (0.5, 40.0),
+    SgTrim.MAX: (40.0, 100.0),
+}
+
+
+class SgTrimLevels(NamedTuple):
+    """A node's trim, in percent (min and start-up in 0.5 % steps)."""
+
+    min: float
+    start_up: float
+    max: int
+
+
+def _trim_byte(trim: SgTrim, percent: float) -> int:
+    low, high = SG_TRIM_RANGES[trim]
+    if not low <= percent <= high:
+        raise ValueError(f"SG {trim.name} trim must be {low}..{high} %, got {percent}")
+    if trim is SgTrim.MAX:
+        # Whole percent (``getSentTrimLevelValue``: max is sent as is).
+        return int(percent)
+    # Half percent, rounded like the app does (``round(level * 2)``).
+    return round(percent * 2)
+
+
+def sg_trim_get(unicast: int, *, tid: int, seq: int) -> bytes:
+    """Access payload asking ``unicast`` for its trim levels."""
+    return (
+        _opcode_bytes(_OP_BYTE_COMMAND)
+        + _header(KIND_TRIM, unicast, tid, seq)
+        + bytes([_TRIM_READ, 0x00])
+    )
+
+
+def sg_trim_set(
+    unicast: int, trim: SgTrim, percent: float, *, tid: int, seq: int
+) -> bytes:
+    """Access payload writing one trim level (percent) into ``unicast``."""
+    trim = SgTrim(trim)
+    return (
+        _opcode_bytes(_OP_BYTE_COMMAND)
+        + _header(KIND_TRIM, unicast, tid, seq)
+        + bytes([trim, _trim_byte(trim, percent)])
+    )
+
+
+def parse_sg_trim(params: bytes) -> SgTrimLevels | None:
+    """Parse a trim reply; None for anything else.
+
+    ``06 01 TID SEQ ADDR_HI ADDR_LO MIN START_UP MAX`` — ADDR is whoever asked.
+    The order is the app's (``TrimLevel(min: [9], startUp: [10], max: [11])``
+    counted with the 3-octet opcode in front), and the read-back above fits it.
+    """
+    if len(params) < 9 or not is_sg_ack(params, KIND_TRIM):
+        return None
+    return SgTrimLevels(
+        min=params[6] / 2, start_up=params[7] / 2, max=params[8]
+    )
+
+
+# --- external push switch input (kind 0x0D)
+
+
+class SgPushSwitchMode(IntEnum):
+    """What the node's push-button input (terminal P) expects.
+
+    The app calls them "Normal" and "Sensor". Normal is the momentary push
+    button of the manual: a short press toggles, holding it dims. Sensor is
+    presumably a maintained contact, such as a motion sensor's relay.
+    """
+
+    NORMAL = 0x01
+    SENSOR = 0x02
+
+
+KIND_PUSH_SWITCH = 0x0D
+
+
+def sg_push_switch_set(
+    unicast: int, mode: SgPushSwitchMode, *, tid: int, seq: int
+) -> bytes:
+    """Access payload choosing what ``unicast``'s push-button input expects."""
+    return (
+        _opcode_bytes(_OP_BYTE_COMMAND)
+        + _header(KIND_PUSH_SWITCH, unicast, tid, seq)
+        + bytes([SgPushSwitchMode(mode)])
+    )
+
+
+# --- fading when switched on (kind 0x0E)
+
+KIND_FADING = 0x0E
+# The app's choices, in tenths of a second (0.5, 1, 2 and 3 s). Nothing longer:
+# a pill refused 6 s (``0e 02 29 29 7fff 3c 01``, 2026-10-17).
+SG_FADING_TENTHS = (5, 10, 20, 30)
+
+
+def sg_fading_set(unicast: int, tenths: int, *, tid: int, seq: int) -> bytes:
+    """Access payload setting ``unicast``'s fade-in time (tenths of a second).
+
+    The last byte is always 01 in the app ("option ... always 1"); the
+    dimming-speed choice it logs next to it never reaches a 3.0 node.
+    """
+    if tenths not in SG_FADING_TENTHS:
+        raise ValueError(f"SG fading must be one of {SG_FADING_TENTHS}, got {tenths}")
+    return (
+        _opcode_bytes(_OP_BYTE_COMMAND)
+        + _header(KIND_FADING, unicast, tid, seq)
+        + bytes([tenths, 0x01])
+    )
+
+
+# ------------------------------------------------------------------ products
+#
+# The product ID (composition data PID) of each SG Smart 3.0 node, with the
+# name the app gives it and what its device page offers in the default mode
+# (``DeviceTypeExtension.sigMeshProductType``, ``getDeviceTypeName``,
+# ``Device.hasLevelSetting``, ``supportsStartUpFading``,
+# ``DeviceTypeExtension.supportsExternalPushSwitch``).
+
+
+class SgProduct(NamedTuple):
+    name: str
+    dimmable: bool  # trim levels and fading
+    push_input: bool  # an external push-switch input
+    # A battery button (switch, wheel): it sends, it is never paired to.
+    is_switch: bool = False
+
+
+_PRODUCTS: dict[int, SgProduct] = {
+    0xA0: SgProduct("LEDDim Smart Push 3.0", True, True),
+    0xA1: SgProduct("LEDDim Smart Pill 3.0", True, True),
+    0xA2: SgProduct("LEDDim Smart Pill Micro 3.0", True, True),
+    0xA3: SgProduct("LEDDim Smart Floor 3.0", True, False),
+    0xA4: SgProduct("LEDDim Smart Ceiling 3.0", True, True),
+    0xA5: SgProduct("LEDDim Smart 3.0", True, True),
+    0xA6: SgProduct("LEDDim Smart 2-pole 3.0", True, True),
+    0xA7: SgProduct("LEDDim Smart Master 3.0", True, True),
+    0xA8: SgProduct("LEDDim Smart DIN 2-pole 3.0", True, True),
+    0xA9: SgProduct("LEDDim Smart DIN 1000 3.0", True, False),
+    0xAA: SgProduct("Smart Pill ON-OFF Micro PF 3.0", False, True),
+    0xAB: SgProduct("Smart Pill ON-OFF Micro 3.0", False, True),
+    0xAC: SgProduct("Smart Plug 3.0", False, False),
+    0xAD: SgProduct("Smart Socket 3.0", False, False),
+    0xAE: SgProduct("Smart DIN 3600 3.0", False, False),
+    0xAF: SgProduct("Smart Switch 3.0", False, False, is_switch=True),
+    0xB0: SgProduct("Smart Switch DK 3.0", False, False, is_switch=True),
+    0xB1: SgProduct("Smart Wireless 3.0", False, False, is_switch=True),
+    0xB2: SgProduct("LEDDim Smart Color Controller 3.0", True, False),
+    0xB3: SgProduct("LEDDim Smart Pill DALI 3.0", True, True),
+    0xB4: SgProduct("HeatReg Smart 3.0", False, False),
+    0xB5: SgProduct("Smart Gateway Wall 3.0", False, False),
+    0xB6: SgProduct("Smart Gateway 3.0", False, False),
+    0xB7: SgProduct("LEDDim Smart Driver 140mA 3.0", True, True),
+    0xB8: SgProduct("LEDDim Smart Driver 350mA 3.0", True, True),
+    0xB9: SgProduct("LEDDim Smart Driver Pill 3.0", True, True),
+    0xBA: SgProduct("LEDDim Smart ZIP Track Dimmer 20VA 3.0", True, False),
+    0xBB: SgProduct("TW LEDDim Smart Push 3.0", True, True),
+    0xBC: SgProduct("TW LEDDim Smart Pill 3.0", True, True),
+    0xBD: SgProduct("TW LEDDim Smart 3.0", True, True),
+    0xBE: SgProduct("LEDDim Smart Driver 100W 3.0", True, True),
+}
+
+# A node whose PID is unknown (absent from an older export, or a product newer
+# than this table) is taken for a dimmer with a push input, as every SG vendor
+# node has been taken for a dimmer until now; a setting it lacks just goes
+# unanswered.
+_UNKNOWN_PRODUCT = SgProduct("SG Smart 3.0", True, True)
+
+
+def sg_product(pid: int) -> SgProduct:
+    """What the SG Smart 3.0 product ``pid`` is and which settings it has."""
+    return _PRODUCTS.get(pid, _UNKNOWN_PRODUCT)

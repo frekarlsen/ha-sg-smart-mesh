@@ -1,5 +1,5 @@
 {
-  "title": "Bluetooth Mesh",
+  "title": "SG Smart 3.0",
   "config": {
     "step": {
       "user": {
@@ -36,7 +36,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Bluetooth Mesh",
+        "title": "SG Smart 3.0",
         "description": "Que voulez-vous faire ?",
         "menu_options": {
           "add_device": "Ajouter un appareil",
@@ -47,7 +47,7 @@
         }
       },
       "settings": {
-        "title": "Options Bluetooth Mesh",
+        "title": "Options SG Smart 3.0",
         "description": "Une lampe mesh n'offre qu'un seul emplacement de connexion proxy Bluetooth. Le garder ouvert rend les commandes instantanées, mais empêche l'application Häfele Connect Mesh de se connecter à la lampe tant que cette intégration est chargée.",
         "data": {
           "inverted_ctl": "Lampes à température de couleur inversée",
@@ -76,7 +76,7 @@
       },
       "pair_switch": {
         "title": "Associer une molette / un interrupteur",
-        "description": "Le variateur mémorise l'association et réagit directement à la molette, sans Home Assistant. Pour une molette et plusieurs variateurs, répétez l'opération pour chaque variateur.",
+        "description": "Le variateur mémorise l'association et réagit directement à la molette, sans Home Assistant. Pour une molette et plusieurs variateurs, répétez l'opération pour chaque variateur.\n\nAssociations faites depuis Home Assistant (celles faites dans l'application SG n'apparaissent pas) :\n{pairings}",
         "data": {
           "switch": "Molette / interrupteur",
           "node": "Variateur",
@@ -135,6 +135,9 @@
   "exceptions": {
     "corrupt_connect_export": {
       "message": "L'export .connect enregistré n'a pas pu être lu ({error}). Reconfigurez l'entrée avec un nouvel export."
+    },
+    "sg_setting_not_confirmed": {
+      "message": "Le variateur {unicast} n'a pas confirmé le réglage. Il est peut-être hors de portée ; réessayez."
     }
   },
   "entity": {
@@ -144,6 +147,12 @@
       },
       "sg_battery_voltage": {
         "name": "Tension de la pile"
+      },
+      "sg_paired_switches": {
+        "name": "Commandé par"
+      },
+      "sg_switch_targets": {
+        "name": "Commande"
       }
     },
     "event": {
@@ -164,7 +173,34 @@
     },
     "number": {
       "sg_min_level": {
-        "name": "Niveau minimum"
+        "name": "Niveau minimum (Home Assistant)"
+      },
+      "sg_trim_min": {
+        "name": "Niveau minimum du variateur"
+      },
+      "sg_trim_start_up": {
+        "name": "Niveau de démarrage"
+      },
+      "sg_trim_max": {
+        "name": "Niveau maximum"
+      }
+    },
+    "select": {
+      "sg_push_switch": {
+        "name": "Entrée bouton-poussoir",
+        "state": {
+          "normal": "Bouton-poussoir",
+          "sensor": "Capteur"
+        }
+      },
+      "sg_fading": {
+        "name": "Allumage progressif",
+        "state": {
+          "fade_5": "0,5 s",
+          "fade_10": "1 s",
+          "fade_20": "2 s",
+          "fade_30": "3 s"
+        }
       }
     }
   },

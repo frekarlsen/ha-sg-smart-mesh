@@ -234,6 +234,20 @@ async def test_concurrent_same_opcode_requests_matched_fifo():
     assert r2.params == b"\x01"
 
 
+async def test_request_match_skips_other_replies_on_the_same_opcode():
+    """A vendor node answers everything on one opcode; match picks the reply."""
+    a, b, _ = make_pair()
+    task = asyncio.create_task(
+        a.request(0x0002, generic_onoff_set(True, 0x13),
+                  OP_GENERIC_ONOFF_STATUS, timeout=1.0,
+                  match=lambda params: params == b"\x01")
+    )
+    await asyncio.sleep(0)
+    b.send_access(0x0001, bytes.fromhex("8204" "00"))  # same opcode, not it
+    b.send_access(0x0001, bytes.fromhex("8204" "01"))  # the one asked for
+    assert (await task).params == b"\x01"
+
+
 async def test_request_cancellation_cleans_up_waiter():
     a, _, _ = make_pair(a_send_filter=lambda pdu, n: False)  # black hole
     task = asyncio.create_task(

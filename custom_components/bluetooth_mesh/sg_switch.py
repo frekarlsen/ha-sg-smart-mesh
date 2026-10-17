@@ -15,6 +15,7 @@ from .btmesh.sg_smart import (
     SG_ACTION_PRESS,
     SG_ACTION_ROTATE,
     SgButtonEvent,
+    sg_product,
 )
 from .const import DOMAIN
 
@@ -55,13 +56,17 @@ def battery_voltage(event: SgButtonEvent) -> float | None:
 def switch_device_info(coordinator, unicast: int) -> DeviceInfo:
     identifier = f"{coordinator.network.identifier}_{unicast:04x}"
     name = None
+    pid = 0
     for node in coordinator.network.nodes:
         if node.unicast == unicast:
             name = node.name or None
+            pid = getattr(node, "pid", 0)
             break
     return DeviceInfo(
         identifiers={(DOMAIN, identifier)},
         name=name or f"SG Smart switch {unicast:04x}",
         manufacturer="SG Armaturen",
-        model="SG Smart 3.0 switch / dimmer wheel",
+        # The product as the SG app names it (Smart Wireless 3.0 for the
+        # wheel), when the export carries the PID.
+        model=sg_product(pid).name if pid else "SG Smart 3.0 switch / dimmer wheel",
     )

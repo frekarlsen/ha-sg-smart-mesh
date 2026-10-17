@@ -1,12 +1,24 @@
 """SG Smart 3.0 vendor encoding, pinned to bytes verified on a real Pill 3.0."""
 
+import pytest
+
 from btmesh.access import parse_access
 from btmesh.sg_smart import (
     OP_SG_STATUS,
+    SgPushSwitchMode,
     SgStatus,
+    SgTrim,
+    SgTrimLevels,
+    is_sg_ack,
     parse_sg_status,
+    parse_sg_trim,
+    sg_fading_set,
     sg_power_level_set,
+    sg_product,
+    sg_push_switch_set,
     sg_status_get,
+    sg_trim_get,
+    sg_trim_set,
 )
 
 
@@ -113,3 +125,94 @@ def test_parse_hold():
 def test_parse_button_event_ignores_other_kinds_and_short():
     assert parse_sg_button_event(bytes.fromhex("03a684ffff011e1900")) is None
     assert parse_sg_button_event(bytes.fromhex("2a1105ffff5a04")) is None
+
+
+# ------------------------------------------------------------ device settings
+
+
+def test_trim_read_matches_hardware_verified_bytes():
+    # Sent to pill 0x0008 with send_raw on 2026-10-17; it answered.
+    assert sg_trim_get(0x0008, tid=0x21, seq=0x21) == bytes.fromhex(
+        "e0e80e06212100080400"
+    )
+
+
+def test_trim_reply_from_hardware():
+    # The answer to the read above: min 10 %, start-up 30 %, max 100 %.
+    opcode, params = parse_access(bytes.fromhex("f0e80e060121217fff143c64"))
+    assert opcode == OP_SG_STATUS
+    assert parse_sg_trim(params) == SgTrimLevels(min=10.0, start_up=30.0, max=100)
+
+
+def test_max_trim_matches_hardware_verified_bytes():
+    # Max 50 %, which visibly capped the lamp on 2026-10-17.
+    assert sg_trim_set(0x0008, SgTrim.MAX, 50, tid=0x22, seq=0x22) == bytes.fromhex(
+        "e0e80e06222200080332"
+    )
+
+
+def test_min_and_start_up_trim_travel_in_half_percent():
+    assert sg_trim_set(0x0008, SgTrim.MIN, 40, tid=1, seq=1)[-2:] == bytes([1, 80])
+    assert sg_trim_set(0x0008, SgTrim.MIN, 0.5, tid=1, seq=1)[-2:] == bytes([1, 1])
+    assert sg_trim_set(0x0008, SgTrim.START_UP, 30, tid=1, seq=1)[-2:] == bytes(
+        [2, 60]
+    )
+
+
+@pytest.mark.parametrize(
+    ("trim", "percent"),
+    [(SgTrim.MIN, 0), (SgTrim.MIN, 64), (SgTrim.START_UP, 40.5), (SgTrim.MAX, 39)],
+)
+def test_trim_outside_the_apps_range_is_refused(trim, percent):
+    # 64 % as a minimum is what the node ignored on 2026-09-27.
+    with pytest.raises(ValueError):
+        sg_trim_set(0x0008, trim, percent, tid=1, seq=1)
+
+
+def test_trim_parser_ignores_short_and_other_kinds():
+    assert parse_sg_trim(bytes.fromhex("0601212100")) is None  # a bare ack
+    assert parse_sg_trim(bytes.fromhex("090121217fff143c64")) is None
+    assert parse_sg_trim(bytes.fromhex("060021217fff143c64")) is None
+
+
+def test_push_switch_payload():
+    assert sg_push_switch_set(
+        0x0008, SgPushSwitchMode.SENSOR, tid=5, seq=5
+    ) == bytes.fromhex("e0e80e0d0505000802")
+    assert sg_push_switch_set(0x0008, SgPushSwitchMode.NORMAL, tid=5, seq=5)[-1] == 1
+
+
+def test_fading_payload_and_choices():
+    assert sg_fading_set(0x0008, 30, tid=0x25, seq=0x25) == bytes.fromhex(
+        "e0e80e0e252500081e01"
+    )
+    with pytest.raises(ValueError):
+        sg_fading_set(0x0008, 15, tid=1, seq=1)
+
+
+def test_ack_is_kind_then_one():
+    assert is_sg_ack(bytes.fromhex("0d01050500"), 0x0D)
+    assert not is_sg_ack(bytes.fromhex("0d00050500"), 0x0D)
+    assert not is_sg_ack(bytes.fromhex("0e01"), 0x0D)
+
+
+def test_products():
+    pill = sg_product(0xA2)
+    assert pill.name == "LEDDim Smart Pill Micro 3.0"
+    assert pill.dimmable and pill.push_input
+    wheel = sg_product(0xB1)
+    assert wheel.name == "Smart Wireless 3.0"
+    assert not wheel.dimmable and not wheel.push_input
+    on_off = sg_product(0xAB)
+    assert not on_off.dimmable and on_off.push_input
+    # Unknown: taken for a dimmer, as every SG node has been so far.
+    assert sg_product(0).dimmable
+
+
+def test_switch_products_are_told_from_outputs():
+    """A wheel not heard yet is still kept out of the dimmer lists."""
+    assert sg_product(0xB1).is_switch  # Smart Wireless 3.0, the wheel
+    assert sg_product(0xAF).is_switch and sg_product(0xB0).is_switch
+    assert not sg_product(0xA2).is_switch
+    assert not sg_product(0xAC).is_switch  # a plug is switched, it is no switch
+    assert not sg_product(0).is_switch  # unknown: taken for a dimmer, as before

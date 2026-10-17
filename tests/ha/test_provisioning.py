@@ -115,6 +115,7 @@ async def test_async_remove_device_unpairs_resets_and_retires(hass):
     from custom_components.bluetooth_mesh.const import (
         CONF_CONNECT_JSON,
         CONF_RETIRED_UNICASTS,
+        CONF_SG_PAIRINGS,
         CONF_SG_SWITCHES,
         DOMAIN,
     )
@@ -129,9 +130,19 @@ async def test_async_remove_device_unpairs_resets_and_retires(hass):
                             num_elements=1, uuid=bytes(range(16)))
     data = add_node(data, wheel, "Hjul", 0)
 
+    other_wheel = 0x0100
+    pairing = {"press": 10, "hold": 255, "rotate": 11}
     entry = MockConfigEntry(
         domain=DOMAIN, data={CONF_CONNECT_JSON: json.dumps(data)},
-        options={CONF_SG_SWITCHES: [wheel.unicast]},
+        options={
+            CONF_SG_SWITCHES: [wheel.unicast],
+            CONF_SG_PAIRINGS: [
+                {"node": pill.unicast, "switch": wheel.unicast, "button": 4, **pairing},
+                # On another button: not the one the unpair above clears.
+                {"node": pill.unicast, "switch": wheel.unicast, "button": 1, **pairing},
+                {"node": pill.unicast, "switch": other_wheel, "button": 4, **pairing},
+            ],
+        },
     )
     entry.add_to_hass(hass)
 
@@ -157,6 +168,11 @@ async def test_async_remove_device_unpairs_resets_and_retires(hass):
     stored = json.loads(entry.data[CONF_CONNECT_JSON])
     assert all(n.get("name") != "Hjul" for n in stored["nodes"])
     assert entry.options[CONF_SG_SWITCHES] == []
+    # Every pairing from the removed wheel is gone from the record; another
+    # wheel's pairing to the same pill stays.
+    assert [(p["node"], p["switch"]) for p in entry.options[CONF_SG_PAIRINGS]] == [
+        (pill.unicast, other_wheel)
+    ]
     assert wheel.unicast in entry.options[CONF_RETIRED_UNICASTS]
     # A retired address is never handed out again.
     assert choose_unicast(stored, 1, set(entry.options[CONF_RETIRED_UNICASTS])) != wheel.unicast

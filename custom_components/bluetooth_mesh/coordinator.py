@@ -53,14 +53,20 @@ from .btmesh.sg_smart import (
     SG_STATUS_GROUP,
     SG_VENDOR_MODEL_ID,
     SgButtonEvent,
+    SgPushSwitchMode,
     SgStatus,
+    SgTrim,
+    SgTrimLevels,
     parse_sg_button_event,
     parse_sg_status,
 )
 from .const import (
     CONF_CONNECT_JSON,
     CONF_KEEPALIVE,
+    CONF_SG_FADING,
     CONF_SG_MIN_LEVEL,
+    CONF_SG_PAIRINGS,
+    CONF_SG_PUSH_SWITCH,
     CONF_SG_SWITCHES,
     CONF_SRC_ADDR,
     CONTROLLED_MODEL_IDS,
@@ -78,6 +84,7 @@ from .mesh_transport import (
     find_proxy_address,
     scanner_by_source,
 )
+from .sg_settings import SgPairing, load_pairings
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +107,14 @@ SIGNAL_NEW_SG_SWITCH = "bluetooth_mesh_new_sg_switch_{}"
 # Dispatcher signal (entry id, unicast) when an SG dimmer's minimum level
 # changes; carries (old, new) so the light can keep its apparent brightness.
 SIGNAL_SG_MIN_LEVEL = "bluetooth_mesh_sg_min_level_{}_{}"
+
+# Dispatcher signal (entry id) when a pairing has been sent or removed, so the
+# "controlled by" / "controls" sensors on both ends of it update.
+SIGNAL_SG_PAIRINGS = "bluetooth_mesh_sg_pairings_{}"
+
+# Dispatcher signal (entry id, unicast) when an SG node's trim levels have been
+# read (or re-read after a write), so its three number entities update.
+SIGNAL_SG_TRIM = "bluetooth_mesh_sg_trim_{}_{}"
 
 # A switch sends each frame of a gesture more than once; a frame not newer
 # than the last one seen (same TID, SEQ not higher) inside this window is a
@@ -330,6 +345,11 @@ class MeshCoordinator:
         # the switch's unicast, and the last (tid, time) seen per switch.
         self._sg_button_listeners: dict[int, list] = {}
         self._sg_last_event: dict[int, tuple[int, int, float]] = {}
+        # SG trim levels as last read from each node (the node holds them, so
+        # they are read rather than stored), and the read in flight per node:
+        # three number entities ask at once and one read answers them all.
+        self._sg_trim: dict[int, SgTrimLevels] = {}
+        self._sg_trim_reads: dict[int, asyncio.Task] = {}
 
     # ------------------------------------------------ derived from the export
 
@@ -532,6 +552,9 @@ class MeshCoordinator:
         self._stopped = True
         self._cancel_probe()
         self._cancel_idle()
+        for task in self._sg_trim_reads.values():
+            task.cancel()
+        self._sg_trim_reads.clear()
         if self._discovery_unsub is not None:
             self._discovery_unsub()
             self._discovery_unsub = None
@@ -1183,7 +1206,11 @@ class MeshCoordinator:
         self, node: int, switch: int, button: int, *,
         press: int, hold: int, rotate: int,
     ) -> bool:
-        """Pair ``switch``/``button`` to ``node`` in the node's own table."""
+        """Pair ``switch``/``button`` to ``node`` in the node's own table.
+
+        All commands NONE unpairs. Once sent, the pairing is recorded (or
+        dropped) in options for the "controlled by" / "controls" sensors.
+        """
 
         async def send(controller) -> bool:
             await controller.sg_pair_switch(
@@ -1191,7 +1218,55 @@ class MeshCoordinator:
             )
             return not controller.failed
 
-        return bool(await self._run_connected(send))
+        sent = bool(await self._run_connected(send))
+        if sent:
+            self._record_sg_pairing(
+                SgPairing(node, switch, button, int(press), int(hold), int(rotate))
+            )
+        return sent
+
+    # ------------------------------------------------ SG pairings sent
+
+    @property
+    def sg_pairings_sent(self) -> list[SgPairing]:
+        """Every pairing Home Assistant has sent and not undone since.
+
+        Home Assistant's record, not the dimmer's: the dimmer's own table
+        (SG kind 0x3A) went unanswered on a Pill Micro 3.0, firmware 0x0041,
+        whether asked directly or on 0xFFFF as the SG app asks. So a pairing
+        made in the SG app is not here, and the pairing command carries no
+        acknowledgement, so "sent" is as far as this can vouch for.
+        """
+        return load_pairings(self.entry.options.get(CONF_SG_PAIRINGS, []))
+
+    def sg_pairings(self, node: int) -> list[SgPairing]:
+        """The switches ``node`` has been paired to from here."""
+        return [p for p in self.sg_pairings_sent if p.node == node]
+
+    def sg_switch_targets(self, switch: int) -> list[SgPairing]:
+        """The nodes ``switch`` has been paired to from here."""
+        return [p for p in self.sg_pairings_sent if p.switch == switch]
+
+    @callback
+    def _record_sg_pairing(self, pairing: SgPairing) -> None:
+        key = pairing[:3]  # node, switch, button: one table entry
+        kept = [p for p in self.sg_pairings_sent if p[:3] != key]
+        if not pairing.unpairs:
+            kept.append(pairing)
+        self._store_sg_pairings(kept)
+
+    @callback
+    def _store_sg_pairings(self, pairings: list[SgPairing]) -> None:
+        self.hass.config_entries.async_update_entry(
+            self.entry,
+            options={
+                **self.entry.options,
+                CONF_SG_PAIRINGS: [p.as_option() for p in sorted(pairings)],
+            },
+        )
+        async_dispatcher_send(
+            self.hass, SIGNAL_SG_PAIRINGS.format(self.entry.entry_id)
+        )
 
     def sg_min_level(self, unicast: int) -> int:
         """Lowest SG level (%) that lights ``unicast``'s load; 0 = none set."""
@@ -1214,6 +1289,100 @@ class MeshCoordinator:
             old,
             level,
         )
+
+    # ------------------------------------------------ SG device settings
+
+    def sg_trim(self, unicast: int) -> SgTrimLevels | None:
+        """``unicast``'s min / start-up / max levels as last read, or None."""
+        return self._sg_trim.get(unicast)
+
+    def _store_sg_trim(self, unicast: int, levels: SgTrimLevels) -> None:
+        self._sg_trim[unicast] = levels
+        async_dispatcher_send(
+            self.hass, SIGNAL_SG_TRIM.format(self.entry.entry_id, unicast)
+        )
+
+    @callback
+    def async_request_sg_trim(self, unicast: int) -> None:
+        """Read ``unicast``'s trim in the background, once however many ask."""
+        task = self._sg_trim_reads.get(unicast)
+        if task is not None and not task.done():
+            return
+        self._sg_trim_reads[unicast] = self.hass.async_create_background_task(
+            self._async_read_sg_trim(unicast),
+            f"bluetooth_mesh sg trim {unicast:04x}",
+        )
+
+    async def _async_read_sg_trim(self, unicast: int) -> None:
+        levels = await self._run_connected(
+            lambda c: c.sg_get_trim(unicast, timeout=STATUS_TIMEOUT)
+        )
+        if levels is not None:
+            self._store_sg_trim(unicast, levels)
+
+    async def async_sg_set_trim(
+        self, unicast: int, trim: SgTrim, percent: float
+    ) -> bool:
+        """Write one trim level, then read all three back; True if it holds.
+
+        The acknowledgement alone is not trusted: what decides is the level
+        the node reports afterwards (and a missing acknowledgement does not
+        fail a write the node did take).
+        """
+
+        async def send(controller) -> SgTrimLevels | None:
+            await controller.sg_set_trim(
+                unicast, trim, percent, timeout=STATUS_TIMEOUT, retries=0
+            )
+            return await controller.sg_get_trim(unicast, timeout=STATUS_TIMEOUT)
+
+        levels = await self._run_connected(send)
+        if levels is None:
+            return False
+        self._store_sg_trim(unicast, levels)
+        held = {
+            SgTrim.MIN: levels.min,
+            SgTrim.START_UP: levels.start_up,
+            SgTrim.MAX: levels.max,
+        }[SgTrim(trim)]
+        return abs(held - percent) < 0.5
+
+    def _sg_option(self, key: str, unicast: int):
+        return self.entry.options.get(key, {}).get(str(unicast))
+
+    def _set_sg_option(self, key: str, unicast: int, value) -> None:
+        values = dict(self.entry.options.get(key, {}))
+        values[str(unicast)] = value
+        self.hass.config_entries.async_update_entry(
+            self.entry, options={**self.entry.options, key: values}
+        )
+
+    def sg_push_switch(self, unicast: int) -> SgPushSwitchMode | None:
+        """The push-input mode last written to ``unicast`` (it cannot be read)."""
+        value = self._sg_option(CONF_SG_PUSH_SWITCH, unicast)
+        return None if value is None else SgPushSwitchMode(value)
+
+    async def async_sg_set_push_switch(
+        self, unicast: int, mode: SgPushSwitchMode
+    ) -> bool:
+        acked = await self._run_connected(
+            lambda c: c.sg_set_push_switch(unicast, mode, timeout=STATUS_TIMEOUT)
+        )
+        if acked:
+            self._set_sg_option(CONF_SG_PUSH_SWITCH, unicast, int(mode))
+        return bool(acked)
+
+    def sg_fading(self, unicast: int) -> int | None:
+        """The fade-in time (tenths of a second) last written to ``unicast``."""
+        return self._sg_option(CONF_SG_FADING, unicast)
+
+    async def async_sg_set_fading(self, unicast: int, tenths: int) -> bool:
+        acked = await self._run_connected(
+            lambda c: c.sg_set_fading(unicast, tenths, timeout=STATUS_TIMEOUT)
+        )
+        if acked:
+            self._set_sg_option(CONF_SG_FADING, unicast, tenths)
+        return bool(acked)
 
     async def async_sg_set_level(self, unicast: int, level: int) -> bool:
         """SG power/level (0 off, 1..100 %, 101 last level); True if it left."""

@@ -11,14 +11,15 @@ from homeassistant.exceptions import ConfigEntryError
 
 from .btmesh.access import HAEFELE_COMPANY_ID
 from .btmesh.network_model import NetworkModelError
-from .services import async_register_services
 from .const import CONF_INVERTED_CTL, DOMAIN, MODEL_LIGHT_CTL
 from .coordinator import MeshCoordinator
+from .services import async_register_services
 
 PLATFORMS: list[Platform] = [
     Platform.EVENT,
     Platform.LIGHT,
     Platform.NUMBER,
+    Platform.SELECT,
     Platform.SENSOR,
 ]
 

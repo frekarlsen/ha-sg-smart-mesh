@@ -7,11 +7,10 @@ raw access message while reverse-engineering a vendor protocol.
 
 from __future__ import annotations
 
+import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError
-import homeassistant.helpers.config_validation as cv
 
 from .btmesh.sg_smart import SgSwitchCommand
 from .const import DOMAIN

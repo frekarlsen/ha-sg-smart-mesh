@@ -6,6 +6,71 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-10-17
+
+### Added
+
+- **SG Smart 3.0 dimmer settings**, under *Configuration* on the device page
+  and stored in the dimmer itself, so they hold for a wheel and the wall
+  button as much as for Home Assistant:
+  - minimum, start-up and maximum level (SG's trim), read from the dimmer and
+    read back after every change;
+  - the push-button input: normal push button or sensor;
+  - the fade-in time (0.5, 1, 2 or 3 s).
+  Which of them a device gets follows its product ID, as on its page in the
+  SG app; the device page also names the product (e.g. *LEDDim Smart Pill
+  Micro 3.0*). Worked out from the SG Smart app 5.0.958; see
+  `docs/sg-smart-3-protocol.md`.
+- **Pairings on both device pages**: *Controlled by* on a dimmer, *Controls*
+  on a wheel or switch (diagnostic sensors, by device name, following a
+  rename), and the list of existing pairings in the *Pair a wheel / switch*
+  dialog. It is Home Assistant's record of the pairings it sends, kept in the
+  entry's options: the dimmer's own table (SG kind `0x3A`) went unanswered on a
+  Pill Micro 3.0, firmware `0x0041`. A pairing made before this version, or in
+  the SG app, shows once it is paired again from Home Assistant. Removing a
+  device drops its pairings from the record.
+- Norwegian (Bokmål) translation.
+- **How the protocol was worked out**, in
+  `docs/sg-smart-3-reverse-engineering.md`: getting an arm64 build of the SG
+  Smart app, decompiling its Dart code with blutter, where each command lives
+  in the app (with the kind bytes of the commands not used yet, as leads), and
+  every hardware test with its bytes. The first analysis of the app, in
+  Norwegian, is added unchanged as `docs/sg-smart-app-report.nb.md`. Neither
+  contains SG code or binaries.
+- `btmesh`: a request can match its reply on more than the opcode
+  (`MeshNode.request(match=...)`). An SG node answers a status read, a trim
+  read and every setting on one opcode, and publishes its own changes there
+  too; the status read now waits for the status reply rather than whatever
+  arrives first.
+
+### Changed
+
+- **Shown as "SG Smart 3.0"** in Home Assistant (integration page, Configure
+  menu, HACS) instead of "Bluetooth Mesh". The domain stays `bluetooth_mesh`:
+  changing it would mean removing and re-adding the integration, with new
+  entity ids. A dimmer wheel's device page names its product too (*Smart
+  Wireless 3.0*).
+- The trim note in the protocol docs is corrected: the pill does honour SG's
+  trim. The 2026-09-27 test sent the minimum in whole percent where the node
+  expects half percent. The Home Assistant minimum stays, renamed
+  *Minimum level (Home Assistant)*, for loads that need more than the 40 % the
+  dimmer's own minimum allows.
+- Dimmer wheels no longer get a meaningless *Minimum level* slider. A wheel
+  or switch is now known by its product ID even before it has been used, so
+  it is never offered as a dimmer in the pairing dialog.
+- The pairing dialog names devices as their device pages do, a rename in
+  Home Assistant included, rather than by their name in the network export.
+
+### Fixed
+
+- Saving *Connection settings* no longer drops the options it does not show.
+  It copied a fixed list of keys, so the fade-in and push-input values of
+  0.12.0rc2 were lost on every save.
+
+- **New integration icon**: the maintainer's SG Smart 3.0 house on red
+  replaces the generated mesh-of-lights motif. `scripts/make_icon.py`, which
+  drew the old one, is gone — running it would have overwritten the new icon.
+
 ## [0.11.0] — 2026-09-27
 
 First release of the **SG Smart 3.0** fork (frekarlsen/ha-sg-smart-mesh).
@@ -1063,6 +1128,7 @@ ESPHome Bluetooth proxy.
   made from the vendor app in parallel are not read back until HA's next
   command.
 
+[0.12.0]: https://github.com/frekarlsen/ha-sg-smart-mesh/releases/tag/v0.12.0
 [0.4.1]: https://github.com/dasimon135/ha-bluetooth-mesh/releases/tag/v0.4.1
 [0.4.0]: https://github.com/dasimon135/ha-bluetooth-mesh/releases/tag/v0.4.0
 [0.3.0]: https://github.com/dasimon135/ha-bluetooth-mesh/releases/tag/v0.3.0

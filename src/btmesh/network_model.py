@@ -130,6 +130,10 @@ class Node:
     cid: int
     name: str
     elements: tuple[Element, ...]
+    # Product ID from the composition data (0 when the export has none). An SG
+    # Smart 3.0 node's PID says which product it is, and so which of SG's
+    # settings it has (``btmesh.sg_smart.sg_product``).
+    pid: int = 0
 
     def has_model(self, model_id: int) -> bool:
         """Whether any element of this node hosts ``model_id``."""
@@ -567,6 +571,11 @@ def _parse_node(raw: dict) -> Node:
     # soon as it is provisioned) carries no composition: no cid, no elements.
     # Keep it anyway — its device key is exactly what configuring it needs.
     cid = _hex_int(raw["cid"], "nodes[].cid") if raw.get("cid") else 0
+    # Informational only, so a malformed PID must not cost the whole network.
+    try:
+        pid = _hex_int(raw["pid"], "nodes[].pid") if raw.get("pid") else 0
+    except NetworkModelError:
+        pid = 0
     raw_elements = raw.get("elements", [])
     if not isinstance(raw_elements, list):
         raise NetworkModelError(
@@ -581,4 +590,5 @@ def _parse_node(raw: dict) -> Node:
         cid=cid,
         name=_node_name(raw),
         elements=elements,
+        pid=pid,
     )

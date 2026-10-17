@@ -44,6 +44,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import BluetoothMeshConfigEntry
+from .btmesh.sg_smart import sg_product
 from .const import (
     CONF_INVERTED_CTL,
     DOMAIN,
@@ -931,7 +932,7 @@ class SgDimmerLight(LightEntity):
             identifiers={(DOMAIN, self._attr_unique_id)},
             name=node.name or f"SG Smart {node.unicast:04x}",
             manufacturer=_manufacturer(node.cid),
-            model="SG Smart 3.0 dimmer",
+            model=sg_product(getattr(node, "pid", 0)).name,
         )
         self._is_on: bool | None = None
         self._level: int | None = None  # last non-zero percent
@@ -1001,10 +1002,13 @@ class SgDimmerLight(LightEntity):
     # --- HA percent <-> SG level, with the load's minimum level spread in.
     #
     # Many LED loads stay dark on a phase dimmer below some level (about 45 %
-    # on the first pill tested), and the pill ignores SG's trim command, so
-    # the minimum is applied here: HA's 1..100 % maps onto min..100 %. The
-    # wheel still dims the pill across its full range; a level under the
-    # minimum then shows as 1 %.
+    # on the first pill tested), so a minimum is applied here: HA's 1..100 %
+    # maps onto min..100 %. This was built when the pill seemed to ignore SG's
+    # trim command; it does not (the 2026-09-27 test sent the minimum in the
+    # wrong unit, see ``btmesh.sg_smart``), and the dimmer's own minimum (the
+    # number entities) now also covers the wheel and the wall button. It stops
+    # at 40 %, though, so a load that needs more keeps this one on top. A
+    # level under it shows as 1 %.
 
     def _pct_to_level(self, pct: int, low: int | None = None) -> int:
         if low is None:
