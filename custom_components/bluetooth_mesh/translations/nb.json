@@ -1,0 +1,334 @@
+{
+  "title": "Bluetooth Mesh",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Importer et Bluetooth Mesh-nettverk",
+        "description": "Importer et Bluetooth SIG Mesh-nettverk for å vise lampene i Home Assistant.",
+        "data": {
+          "connect_json": "Nettverkseksport (.connect)"
+        },
+        "data_description": {
+          "connect_json": "Åpne .connect-eksportfilen fra ThingOS / Häfele Connect Mesh i et tekstprogram og lim inn hele innholdet her. Den inneholder nettverksnøklene og nodelisten."
+        }
+      },
+      "reconfigure": {
+        "title": "Importer Bluetooth Mesh-nettverket på nytt",
+        "description": "Lim inn en nylig eksportert .connect-fil for å oppdatere nettverket, etter at du har lagt til en node eller fornyet en nøkkel. Det må være samme nettverk.",
+        "data": {
+          "connect_json": "Nettverkseksport (.connect)"
+        },
+        "data_description": {
+          "connect_json": "Åpne .connect-eksportfilen fra ThingOS / Häfele Connect Mesh i et tekstprogram og lim inn hele innholdet her. Den inneholder nettverksnøklene og nodelisten."
+        }
+      }
+    },
+    "error": {
+      "invalid_connect": "Teksten er ikke en gyldig .connect-nettverkseksport: {error}. Lim inn hele innholdet i den eksporterte filen.",
+      "invalid_json": "Teksten er ikke gyldig JSON: {error}. Lim inn hele innholdet i den eksporterte filen; en ufullstendig eller ombrutt kopi kan ikke leses."
+    },
+    "abort": {
+      "already_configured": "Dette mesh-nettverket er allerede konfigurert.",
+      "wrong_network": "Eksporten tilhører et annet mesh-nettverk. Importer nettverket denne oppføringen ble laget fra, eller legg til det andre som en egen oppføring.",
+      "reconfigure_successful": "Nettverkseksporten ble oppdatert."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bluetooth Mesh",
+        "description": "Hva vil du gjøre?",
+        "menu_options": {
+          "add_device": "Legg til en enhet",
+          "pair_switch": "Koble et hjul / en bryter til en dimmer",
+          "remove_device": "Fjern en enhet",
+          "backup": "Ta sikkerhetskopi av nettverket",
+          "settings": "Tilkoblingsinnstillinger"
+        }
+      },
+      "settings": {
+        "title": "Bluetooth Mesh-innstillinger",
+        "description": "En mesh-lampe har bare én Bluetooth-proxyplass. Holdes den åpen, går kommandoer umiddelbart, men da kan ikke Häfele Connect Mesh-appen koble til lampen mens integrasjonen er lastet.",
+        "data": {
+          "inverted_ctl": "Lamper med invertert fargetemperatur",
+          "keepalive_seconds": "Hold tilkoblingen åpen i (sekunder)",
+          "src_addr": "Send fra unicast-adresse"
+        },
+        "data_description": {
+          "inverted_ctl": "Kryss av for en lampe som lyser varmhvitt når Home Assistant sier kaldt, og kaldt når den sier varmt. Ønsket temperatur speiles da før den sendes, fra neste kommando – avkrysningen farger ikke om en lampe som allerede lyser. La alle andre lamper stå uten kryss: å speile en lampe som allerede er riktig, bytter om varmt og kaldt. Dette stilles per lampe fordi feilen varierer mellom modeller og fastvare fra samme produsent.",
+          "keepalive_seconds": "Hvor lenge proxytilkoblingen holdes etter siste kommando. 0 = alltid tilkoblet (raskest; Häfele-appen kan ikke bruke lampen). En positiv verdi gir lampen tilbake til appen etter så lang tid uten bruk, mot noen sekunders ny tilkobling ved neste kommando. I den modusen sjekker ikke Home Assistant lampen i bakgrunnen, for å holde plassen ledig: en lampe som er slått av på veggen eller trukket ut, vises som tilgjengelig til neste kommando feiler.",
+          "src_addr": "Adressen Home Assistant sender fra. 0 finner den automatisk, og det er nesten alltid riktig. Sett den bare hvis kommandoer ignoreres uten feilmelding: en eksport viser ingen provisioner, så hvis produsentens app har tatt samme adresse, forkastes alle meldinger som gjentakelser uten at noe sier fra."
+        }
+      },
+      "add_device": {
+        "title": "Legg til en enhet",
+        "description": "Enheter HA har hørt som er fabrikktilbakestilt og venter på oppsett, sist hørt først. En batterienhet (dimmehjul, bryter) melder seg bare kort etter at den er vekket eller tilbakestilt: vekk den, velg «Søk igjen» og trykk Send. Det er oppføringen som ble sett for noen sekunder siden. Mens en enhet legges til, fortsett å trykke på den: hjulet eller bryteren, eller dimmerens knapp (av/på eller R).",
+        "data": {
+          "device": "Enhet",
+          "name": "Navn"
+        },
+        "data_description": {
+          "name": "Hva enheten skal hete i Home Assistant"
+        }
+      },
+      "add_device_run": {
+        "title": "Legger til {name}"
+      },
+      "pair_switch": {
+        "title": "Koble et hjul / en bryter",
+        "description": "Dimmeren lagrer koblingen og reagerer direkte på hjulet, uten Home Assistant. Koble ett hjul til flere dimmere ved å kjøre dette én gang per dimmer.",
+        "data": {
+          "switch": "Hjul / bryter",
+          "node": "Dimmer",
+          "mode": "Hva skal gjøres",
+          "press": "Kort trykk",
+          "rotate": "Vri på hjulet",
+          "hold": "Hold inne"
+        }
+      },
+      "remove_device": {
+        "title": "Fjern en enhet",
+        "description": "Enheten fabrikktilbakestilles over meshet (som når den fjernes i SG-appen) og fjernes fra Home Assistant. Et hjul eller en bryter kobles først fra alle dimmere. En batterienhet sover: trykk eller vri på den mens den fjernes.",
+        "data": {
+          "device": "Enhet",
+          "force": "Fjern likevel hvis enheten ikke svarer"
+        }
+      },
+      "remove_device_run": {
+        "title": "Fjerner {name}"
+      }
+    },
+    "progress": {
+      "adding": "Setter opp {name}: provisjonering, deretter konfigurering. Dette tar opptil to minutter. Fortsett å trykke på enheten mens det pågår: hjulet eller bryteren, eller dimmerens knapp (av/på eller R).",
+      "removing": "Tilbakestiller {name}. For en batterienhet: fortsett å trykke eller vri på den. Dette tar opptil ett minutt."
+    },
+    "error": {
+      "no_devices": "Fant ingen enhet som venter på oppsett. Fabrikktilbakestill enheten (SG: tilbakestillingen i manualen), sørg for at den er nær en Bluetooth-proxy, og trykk Send for å søke igjen.",
+      "send_failed": "Kommandoen kunne ikke sendes: er meshet tilkoblet?"
+    },
+    "abort": {
+      "backup_written": "Nettverket (nøkler, noder og enhetsnøkler) ble skrevet til {path}. Ta vare på en kopi et trygt sted: uten den må alle enheter fabrikktilbakestilles hvis denne Home Assistant går tapt. Den kan importeres igjen med Rekonfigurer.",
+      "device_added": "{name} ble lagt til som {unicast}.",
+      "device_added_switch": "{name} ble lagt til som {unicast}. Knappe- og batterientitetene dukker opp når den tas i bruk. Koble den til en dimmer med handlingen bluetooth_mesh.pair_switch.",
+      "device_added_unconfigured": "{name} ble provisjonert som {unicast}, men svarte ikke på konfigureringen ({error}). Nøklene er lagret. Vekk den (trykk eller vri) og kjør handlingen bluetooth_mesh.configure_node for {unicast}.",
+      "add_device_failed": "Enheten kunne ikke legges til: {error}. Den er ikke en del av nettverket; fabrikktilbakestill den og prøv igjen.",
+      "not_loaded": "Integrasjonen må kjøre (være koblet til meshet) for å legge til en enhet.",
+      "paired": "{switch} styrer nå {node}. Prøv: det virker uten Home Assistant.",
+      "unpaired": "{switch} styrer ikke lenger {node}.",
+      "nothing_to_pair": "Legg til minst én SG-dimmer og ett hjul eller én bryter først.",
+      "device_removed": "{name} ble fabrikktilbakestilt og fjernet. Den kan legges til igjen, her eller i SG-appen.",
+      "device_forgotten": "{name} ble fjernet fra Home Assistant, men bekreftet ikke tilbakestillingen. Fabrikktilbakestill den manuelt før den brukes igjen.",
+      "remove_device_failed": "{name} ble ikke fjernet: {error}.",
+      "nothing_to_remove": "Det finnes ingen enhet å fjerne."
+    }
+  },
+  "issues": {
+    "proxy_unreachable": {
+      "title": "Ingen Bluetooth-proxy for mesh-nettverket {network}",
+      "description": "Home Assistant finner ingen Bluetooth-proxy som annonserer mesh-nettverket «{network}» (forventet Network ID {network_id}). En mesh-node har bare én proxyplass: er Häfele Connect Mesh-appen (eller en annen klient) koblet til en lampe, holder den plassen og Home Assistant stenges ute. Lukk appen og frigjør lampen, og sørg for at minst én lampe har strøm og er innen rekkevidde av en Bluetooth-proxy.\n\nDiagnostikk – mesh-proxyannonser Home Assistant ser nå: {seen}\n\nHome Assistant prøver igjen og fjerner dette varselet automatisk når en proxy kan nås."
+    },
+    "proxy_stuck": {
+      "title": "Start Bluetooth-proxyen {proxy} på nytt",
+      "description": "Proxyen **{proxy}** (`{proxy_address}`) har avvist alle tilkoblinger til mesh-nettverket «{network}» {failures} ganger på rad, hver gang innen omtrent ett sekund, selv om den fortsatt hører noden. Lampen er ikke problemet: proxyen har hengt seg opp på denne adressen, og bare en omstart løser det.\n\nTa strømmen fra **{proxy}** i noen sekunder og sett den i igjen. Har ESPHome-konfigurasjonen din en *Restart*-knapp, virker den også. **Ikke trykk *Factory reset***: det løser ikke problemet, og kan slette Wi-Fi-innstillingene proxyen ble satt opp med. Home Assistant kobler til igjen av seg selv få sekunder etter at proxyen er tilbake, og dette varselet forsvinner.\n\nTilstanden oppstår når noden forsvinner (trukket ut, utenfor rekkevidde) mens proxyen holder en tilkobling til den. Ingenting i denne integrasjonen kan løse det fra Home Assistant-siden."
+    }
+  },
+  "exceptions": {
+    "corrupt_connect_export": {
+      "message": "Den lagrede .connect-eksporten kunne ikke leses ({error}). Rekonfigurer oppføringen med en fersk eksport."
+    },
+    "sg_setting_not_confirmed": {
+      "message": "Dimmeren {unicast} bekreftet ikke innstillingen. Den kan være utenfor rekkevidde; prøv igjen."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "proxy_address": {
+        "name": "Proxy-adresse"
+      },
+      "sg_battery_voltage": {
+        "name": "Batterispenning"
+      }
+    },
+    "event": {
+      "sg_switch": {
+        "name": "Knapp",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "press": "Trykk",
+              "hold": "Hold inne",
+              "rotate_up": "Vri opp",
+              "rotate_down": "Vri ned",
+              "unknown": "Ukjent"
+            }
+          }
+        }
+      }
+    },
+    "number": {
+      "sg_min_level": {
+        "name": "Minimumsnivå (Home Assistant)"
+      },
+      "sg_trim_min": {
+        "name": "Minimumsnivå i dimmeren"
+      },
+      "sg_trim_start_up": {
+        "name": "Oppstartsnivå"
+      },
+      "sg_trim_max": {
+        "name": "Maksnivå"
+      }
+    },
+    "select": {
+      "sg_push_switch": {
+        "name": "Trykkbryterinngang",
+        "state": {
+          "normal": "Trykkbryter",
+          "sensor": "Sensor"
+        }
+      },
+      "sg_fading": {
+        "name": "Fading",
+        "state": {
+          "fade_5": "0,5 s",
+          "fade_10": "1 s",
+          "fade_20": "2 s",
+          "fade_30": "3 s"
+        }
+      }
+    }
+  },
+  "services": {
+    "get_composition": {
+      "name": "Hent komposisjon",
+      "description": "Les en nodes Composition Data (modeller). Hold en batterienhet våken mens det pågår.",
+      "fields": {
+        "unicast": {
+          "name": "Unicast-adresse",
+          "description": "Nodens adresse, f.eks. 0x0004"
+        },
+        "seconds": {
+          "name": "Sekunder",
+          "description": "Hvor lenge det skal prøves"
+        }
+      }
+    },
+    "configure_node": {
+      "name": "Konfigurer node",
+      "description": "Legg til AppKey, bind alle modeller og pek publiseringen mot Home Assistant. Hold en batterienhet våken mens det pågår.",
+      "fields": {
+        "unicast": {
+          "name": "Unicast-adresse",
+          "description": "Nodens adresse, f.eks. 0x0004"
+        },
+        "seconds": {
+          "name": "Sekunder",
+          "description": "Hvor lenge det skal prøves"
+        },
+        "publish_address": {
+          "name": "Publiseringsadresse",
+          "description": "Hvor noden skal publisere (standard 0xCEE8)"
+        }
+      }
+    },
+    "send_raw": {
+      "name": "Send rå melding",
+      "description": "Send en access-payload (med opkode, hex).",
+      "fields": {
+        "destination": {
+          "name": "Mottaker",
+          "description": "Adresse"
+        },
+        "payload": {
+          "name": "Payload",
+          "description": "Hex, med opkode"
+        },
+        "device_key": {
+          "name": "Enhetsnøkkel",
+          "description": "Krypter med nodens enhetsnøkkel (Config-meldinger)"
+        }
+      }
+    },
+    "pair_switch": {
+      "name": "Koble bryter",
+      "description": "Få en dimmer til å reagere direkte på en bryter eller et dimmehjul. Koblingen lagres i dimmeren, så den virker uten Home Assistant.",
+      "fields": {
+        "node": {
+          "name": "Dimmer / aktuator",
+          "description": "Adressen til noden som skal reagere, f.eks. 0x0003"
+        },
+        "switch": {
+          "name": "Bryter / hjul",
+          "description": "Adressen til bryteren eller dimmehjulet, f.eks. 0x0004"
+        },
+        "button": {
+          "name": "Knappeindeks",
+          "description": "4 for SG Smart 3.0-dimmehjulet"
+        },
+        "press": {
+          "name": "Trykk",
+          "description": "Hva et kort trykk gjør"
+        },
+        "hold": {
+          "name": "Hold inne",
+          "description": "Hva det å holde knappen inne gjør"
+        },
+        "rotate": {
+          "name": "Vri",
+          "description": "Hva det å vri på hjulet gjør"
+        }
+      }
+    },
+    "unpair_switch": {
+      "name": "Koble fra bryter",
+      "description": "Fjern koblingen mellom en bryterknapp og en dimmer.",
+      "fields": {
+        "node": {
+          "name": "Dimmer / aktuator",
+          "description": "Adressen til noden som skal reagere, f.eks. 0x0003"
+        },
+        "switch": {
+          "name": "Bryter / hjul",
+          "description": "Adressen til bryteren eller dimmehjulet, f.eks. 0x0004"
+        },
+        "button": {
+          "name": "Knappeindeks",
+          "description": "4 for SG Smart 3.0-dimmehjulet"
+        }
+      }
+    },
+    "set_min_level": {
+      "name": "Sett minimumsnivå",
+      "description": "Laveste nivå (%) der lasten på en SG-dimmer fortsatt lyser. Home Assistants 1–100 % fordeles fra dette nivået til 100 %. 0 fjerner det.",
+      "fields": {
+        "unicast": {
+          "name": "Dimmerens adresse",
+          "description": "f.eks. 0x0003"
+        },
+        "min_level": {
+          "name": "Minimumsnivå",
+          "description": "Nivået der lampen begynner å lyse"
+        }
+      }
+    }
+  },
+  "selector": {
+    "switch_command": {
+      "options": {
+        "none": "Ingenting",
+        "toggle_on_off": "Av/på",
+        "on": "På",
+        "off": "Av",
+        "dim": "Dimme opp/ned",
+        "dim_up": "Dimme opp",
+        "dim_down": "Dimme ned"
+      }
+    },
+    "pair_mode": {
+      "options": {
+        "pair": "Koble",
+        "unpair": "Fjern kobling"
+      }
+    }
+  }
+}

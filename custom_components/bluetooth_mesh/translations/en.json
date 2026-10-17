@@ -135,6 +135,9 @@
   "exceptions": {
     "corrupt_connect_export": {
       "message": "The stored .connect export could not be read ({error}). Reconfigure the entry with a fresh export."
+    },
+    "sg_setting_not_confirmed": {
+      "message": "The dimmer at {unicast} did not confirm the setting. It may be out of reach; try again."
     }
   },
   "entity": {
@@ -164,7 +167,34 @@
     },
     "number": {
       "sg_min_level": {
-        "name": "Minimum level"
+        "name": "Minimum level (Home Assistant)"
+      },
+      "sg_trim_min": {
+        "name": "Dimmer minimum level"
+      },
+      "sg_trim_start_up": {
+        "name": "Start-up level"
+      },
+      "sg_trim_max": {
+        "name": "Maximum level"
+      }
+    },
+    "select": {
+      "sg_push_switch": {
+        "name": "Push-button input",
+        "state": {
+          "normal": "Push button",
+          "sensor": "Sensor"
+        }
+      },
+      "sg_fading": {
+        "name": "Fade-in",
+        "state": {
+          "fade_5": "0.5 s",
+          "fade_10": "1 s",
+          "fade_20": "2 s",
+          "fade_30": "3 s"
+        }
       }
     }
   },
