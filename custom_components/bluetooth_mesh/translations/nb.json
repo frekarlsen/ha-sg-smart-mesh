@@ -76,7 +76,7 @@
       },
       "pair_switch": {
         "title": "Koble et hjul / en bryter",
-        "description": "Dimmeren lagrer koblingen og reagerer direkte på hjulet, uten Home Assistant. Koble ett hjul til flere dimmere ved å kjøre dette én gang per dimmer.",
+        "description": "Dimmeren lagrer koblingen og reagerer direkte på hjulet, uten Home Assistant. Koble ett hjul til flere dimmere ved å kjøre dette én gang per dimmer.\n\nKoblet fra Home Assistant (koblinger gjort i SG-appen vises ikke):\n{pairings}",
         "data": {
           "switch": "Hjul / bryter",
           "node": "Dimmer",

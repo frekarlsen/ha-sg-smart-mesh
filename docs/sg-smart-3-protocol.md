@@ -207,10 +207,29 @@ from wheel `0x0007` (meaning of the last byte unknown).
 
 ### Also in the app, not mapped further
 
-`11` firmware version request, `32` clear all settings, `3A FF FF IDX` read
-the node's switch pairings (short/long/double press, rotation per switch).
-The app sends every command to `0xFFFF` with the node in the payload, except
-kinds `0x35` and `0x38`.
+`11` firmware version request, `32` clear all settings. The app sends every
+command to `0xFFFF` with the node in the payload, except kinds `0x35` and
+`0x38`.
+
+### Switch table read — kind `0x3A` (unanswered)
+
+```
+3A TID SEQ NODE_HI NODE_LO FF FF PAGE        (PAGE 1..8)
+```
+
+The app runs this only from its hidden debug page
+(`RequestSigMeshControllerSettingsTask`). Its parser expects
+`3A 01 TID SEQ ADDR_HI ADDR_LO PAGE` and up to four 54-byte entries: the
+switch, a second address the app prints as "to", and five buttons of five
+(command, target) pairs (short press, long press, double press, long-press
+release, rotation).
+
+On 2026-10-17 a Pill Micro 3.0 (`A2`, firmware `0x0041`) answered neither page
+1 nor page 2, addressed to the node or to `0xFFFF` as the app sends it, while
+it answered trim and fade-in at once. The firmware most likely lacks it. So the
+integration does not read pairings from the dimmer: it records the pairings it
+sends (options key `sg_pairings`) and shows those. A pairing made in the SG app
+is not shown.
 
 ## Products
 

@@ -248,9 +248,9 @@ def test_which_nodes_get_which_settings():
     coord.network.nodes = [pill, wheel, on_off, heard_wheel]
     coord.sg_switches = [7]  # a wheel heard on the mesh, PID unknown
     found = {node.unicast: product for node, product in sg_nodes(coord)}
-    assert set(found) == {8, 6, 9}
+    # The wheel is left out by its product ID before it has ever been heard.
+    assert set(found) == {8, 9}
     assert found[8].dimmable and found[8].push_input
-    assert not found[6].dimmable and not found[6].push_input
     assert not found[9].dimmable and found[9].push_input
 
 

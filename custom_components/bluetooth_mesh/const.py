@@ -65,6 +65,14 @@ CONF_SG_MIN_LEVEL = "sg_min_level"
 CONF_SG_PUSH_SWITCH = "sg_push_switch"
 CONF_SG_FADING = "sg_fading"
 
+# Options key: every switch pairing Home Assistant has sent, as a list of
+# {"node", "switch", "button", "press", "hold", "rotate"} (addresses and wire
+# commands as integers). The dimmer keeps the pairing; this is only Home
+# Assistant's record of it, because the dimmer's own table (SG kind 0x3A) went
+# unanswered on a Pill Micro 3.0 (firmware 0x0041) addressed either to the
+# node or to all nodes, as the SG app sends it.
+CONF_SG_PAIRINGS = "sg_pairings"
+
 # Options key: unicast addresses of nodes removed from the network. Never handed
 # out again: every other node still remembers the sequence number it last saw
 # from such an address, and would drop a newcomer's messages as replays.

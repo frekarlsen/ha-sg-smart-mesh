@@ -49,10 +49,10 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from . import BluetoothMeshConfigEntry
-from .btmesh.sg_smart import SgButtonEvent, SgSwitchCommand, SgSwitchPairing
+from .btmesh.sg_smart import SgButtonEvent
 from .const import DOMAIN
 from .coordinator import SIGNAL_NEW_SG_SWITCH, SIGNAL_SG_PAIRINGS, MeshCoordinator
-from .sg_settings import sg_nodes, sg_unicast
+from .sg_settings import SgPairing, command_name, device_name, sg_nodes
 from .sg_switch import battery_voltage, switch_device_info
 
 
@@ -68,11 +68,8 @@ async def async_setup_entry(
             MeshProxySensor(coordinator),
             *(SgSwitchBattery(coordinator, u) for u in coordinator.sg_switches),
             *(SgSwitchTargets(coordinator, u) for u in coordinator.sg_switches),
-            *(
-                SgPairedSwitches(coordinator, node)
-                for node, product in sg_nodes(coordinator)
-                if product.dimmable or product.push_input
-            ),
+            # Every SG output node: the pairing dialog offers them all.
+            *(SgPairedSwitches(coordinator, node) for node, _ in sg_nodes(coordinator)),
         ]
     )
 
@@ -148,54 +145,34 @@ class SgSwitchBattery(RestoreSensor):
 # --------------------------------------------------------- SG pairings
 #
 # A wheel paired to a dimmer drives it without Home Assistant, and the pairing
-# lives only in the dimmer's own switch table. These two sensors show that
-# table from both ends: on the dimmer, which switches it reacts to; on the
-# switch, which dimmers react to it. They read the dimmer (pairings made in
-# the SG app show too) and re-read it after every pairing from here.
-
-_COMMAND_KEYS = {
-    SgSwitchCommand.TOGGLE_DIM: "dim",
-}
+# lives in the dimmer's own switch table. These two sensors show the pairings
+# from both ends: on the dimmer, which switches it reacts to; on the switch,
+# which dimmers react to it. They show what Home Assistant has sent, not the
+# table itself: a Pill Micro 3.0 (firmware 0x0041) left SG's table read (kind
+# 0x3A) unanswered, both addressed to it and on 0xFFFF as the SG app sends it.
+# A pairing made in the SG app therefore does not show here.
 
 
-def _command(command: int) -> str:
-    try:
-        value = SgSwitchCommand(command)
-    except ValueError:
-        return f"0x{command:02x}"
-    return _COMMAND_KEYS.get(value, value.name.lower())
-
-
-def _actions(pairing: SgSwitchPairing) -> list[dict]:
-    return [
-        {
-            "button": index,
-            "press": _command(actions.press[0]),
-            "hold": _command(actions.hold[0]),
-            "rotate": _command(actions.rotate[0]),
-            "double_press": _command(actions.double_press[0]),
-            "hold_release": _command(actions.hold_release[0]),
-        }
-        for index, actions in sorted(pairing.buttons.items())
-    ]
-
-
-def _device_name(hass, coordinator: MeshCoordinator, unicast: int) -> str:
-    """What the device page calls ``unicast`` (a rename in HA included)."""
-    identifier = f"{coordinator.network.identifier}_{unicast:04x}"
-    device = dr.async_get(hass).async_get_device(identifiers={(DOMAIN, identifier)})
-    if device is not None and (device.name_by_user or device.name):
-        return device.name_by_user or device.name
-    return f"0x{unicast:04x}"
+def _describe(hass, coordinator: MeshCoordinator, address: int, p: SgPairing) -> dict:
+    return {
+        "name": device_name(hass, coordinator, address),
+        "address": f"0x{address:04x}",
+        "button": p.button,
+        "press": command_name(p.press),
+        "hold": command_name(p.hold),
+        "rotate": command_name(p.rotate),
+    }
 
 
 def _join(names: list[str]) -> str:
     # A sensor state is capped at 255 characters; the attributes carry it all.
-    text = ", ".join(names) if names else "–"
+    text = ", ".join(dict.fromkeys(names)) if names else "–"
     return text if len(text) <= 255 else text[:252] + "..."
 
 
 class _SgPairingSensor(SensorEntity):
+    """Shown whatever the link's state: the record is Home Assistant's own."""
+
     _attr_has_entity_name = True
     _attr_should_poll = False
     _attr_entity_category = EntityCategory.DIAGNOSTIC
@@ -212,62 +189,52 @@ class _SgPairingSensor(SensorEntity):
                 self.async_write_ha_state,
             )
         )
-        self.async_on_remove(self._coordinator.async_add_listener(self._changed))
-        self._changed()
+        # The state is device names: follow a rename on either end.
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                dr.EVENT_DEVICE_REGISTRY_UPDATED, self._registry_updated
+            )
+        )
 
     @callback
-    def _changed(self) -> None:
-        self.async_write_ha_state()
-
-    @property
-    def available(self) -> bool:
-        return self._coordinator.available
+    def _registry_updated(self, event) -> None:
+        if event.data.get("action") == "update":
+            self.async_write_ha_state()
 
 
 class SgPairedSwitches(_SgPairingSensor):
-    """On a dimmer: the switches and wheels it reacts to on its own."""
+    """On a dimmer: the switches and wheels paired to it from Home Assistant."""
 
     _attr_translation_key = "sg_paired_switches"
 
     def __init__(self, coordinator: MeshCoordinator, node) -> None:
         super().__init__(coordinator)
-        self._unicast = sg_unicast(node)
+        self._unicast = node.unicast  # what the pairing dialog sends to
         device_key = f"{coordinator.network.identifier}_{node.unicast:04x}"
         self._attr_unique_id = f"{device_key}_paired_switches"
         self._attr_device_info = DeviceInfo(identifiers={(DOMAIN, device_key)})
 
-    @callback
-    def _changed(self) -> None:
-        if self._coordinator.available:
-            self._coordinator.async_request_sg_pairings(self._unicast)
-        self.async_write_ha_state()
-
     @property
-    def native_value(self) -> str | None:
-        pairings = self._coordinator.sg_pairings(self._unicast)
-        if pairings is None:
-            return None
+    def native_value(self) -> str:
         return _join(
-            [_device_name(self.hass, self._coordinator, p.switch) for p in pairings]
+            [
+                device_name(self.hass, self._coordinator, p.switch)
+                for p in self._coordinator.sg_pairings(self._unicast)
+            ]
         )
 
     @property
     def extra_state_attributes(self) -> dict:
-        pairings = self._coordinator.sg_pairings(self._unicast) or []
         return {
             "switches": [
-                {
-                    "name": _device_name(self.hass, self._coordinator, p.switch),
-                    "address": f"0x{p.switch:04x}",
-                    "buttons": _actions(p),
-                }
-                for p in pairings
+                _describe(self.hass, self._coordinator, p.switch, p)
+                for p in self._coordinator.sg_pairings(self._unicast)
             ]
         }
 
 
 class SgSwitchTargets(_SgPairingSensor):
-    """On a switch or wheel: the dimmers that react to it on their own."""
+    """On a switch or wheel: the dimmers it has been paired to from Home Assistant."""
 
     _attr_translation_key = "sg_switch_targets"
 
@@ -283,8 +250,8 @@ class SgSwitchTargets(_SgPairingSensor):
     def native_value(self) -> str:
         return _join(
             [
-                _device_name(self.hass, self._coordinator, dimmer)
-                for dimmer, _ in self._coordinator.sg_switch_targets(self._unicast)
+                device_name(self.hass, self._coordinator, p.node)
+                for p in self._coordinator.sg_switch_targets(self._unicast)
             ]
         )
 
@@ -292,14 +259,8 @@ class SgSwitchTargets(_SgPairingSensor):
     def extra_state_attributes(self) -> dict:
         return {
             "dimmers": [
-                {
-                    "name": _device_name(self.hass, self._coordinator, dimmer),
-                    "address": f"0x{dimmer:04x}",
-                    "buttons": _actions(pairing),
-                }
-                for dimmer, pairing in self._coordinator.sg_switch_targets(
-                    self._unicast
-                )
+                _describe(self.hass, self._coordinator, p.node, p)
+                for p in self._coordinator.sg_switch_targets(self._unicast)
             ]
         }
 

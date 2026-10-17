@@ -76,7 +76,7 @@
       },
       "pair_switch": {
         "title": "Associer une molette / un interrupteur",
-        "description": "Le variateur mémorise l'association et réagit directement à la molette, sans Home Assistant. Pour une molette et plusieurs variateurs, répétez l'opération pour chaque variateur.",
+        "description": "Le variateur mémorise l'association et réagit directement à la molette, sans Home Assistant. Pour une molette et plusieurs variateurs, répétez l'opération pour chaque variateur.\n\nAssociations faites depuis Home Assistant (celles faites dans l'application SG n'apparaissent pas) :\n{pairings}",
         "data": {
           "switch": "Molette / interrupteur",
           "node": "Variateur",

@@ -63,7 +63,11 @@ devices from Home Assistant alone.
   moment after it is woken — wake it, then choose *Search again*.
 - **Pair a wheel / switch to a dimmer** — pick both by name and what a short
   press, a turn and a hold should do. The dimmer stores the pairing. One wheel
-  can drive several dimmers: pair it with each.
+  can drive several dimmers: pair it with each. The dialog lists what is
+  paired already, and the device pages show it too: *Controlled by* on the
+  dimmer, *Controls* on the wheel. That is Home Assistant's record of the
+  pairings it has sent — the dimmers do not answer a read of their own table —
+  so a pairing made in the SG app does not show.
 - **Remove a device** — factory resets the device over the mesh (Config Node
   Reset, like removing it in the SG app), unpairs a wheel from every dimmer
   first, and removes it from HA. Its address is never reused, because the other

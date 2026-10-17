@@ -19,6 +19,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   SG app; the device page also names the product (e.g. *LEDDim Smart Pill
   Micro 3.0*). Worked out from the SG Smart app 5.0.958; see
   `docs/sg-smart-3-protocol.md`.
+- **Pairings on both device pages**: *Controlled by* on a dimmer, *Controls*
+  on a wheel or switch (diagnostic sensors, by device name, following a
+  rename), and the list of existing pairings in the *Pair a wheel / switch*
+  dialog. It is Home Assistant's record of the pairings it sends, kept in the
+  entry's options: the dimmer's own table (SG kind `0x3A`) went unanswered on a
+  Pill Micro 3.0, firmware `0x0041`. A pairing made before this version, or in
+  the SG app, shows once it is paired again from Home Assistant. Removing a
+  device drops its pairings from the record.
 - Norwegian (Bokmål) translation.
 - `btmesh`: a request can match its reply on more than the opcode
   (`MeshNode.request(match=...)`). An SG node answers a status read, a trim
@@ -38,7 +46,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   expects half percent. The Home Assistant minimum stays, renamed
   *Minimum level (Home Assistant)*, for loads that need more than the 40 % the
   dimmer's own minimum allows.
-- Dimmer wheels no longer get a meaningless *Minimum level* slider.
+- Dimmer wheels no longer get a meaningless *Minimum level* slider. A wheel
+  or switch is now known by its product ID even before it has been used, so
+  it is never offered as a dimmer in the pairing dialog.
+- The pairing dialog names devices as their device pages do, a rename in
+  Home Assistant included, rather than by their name in the network export.
+
+### Fixed
+
+- Saving *Connection settings* no longer drops the options it does not show.
+  It copied a fixed list of keys, so the fade-in and push-input values of
+  0.12.0rc2 were lost on every save.
 
 - **New integration icon**: the maintainer's SG Smart 3.0 house on red
   replaces the generated mesh-of-lights motif. `scripts/make_icon.py`, which

@@ -37,6 +37,7 @@ from .const import (
     CONF_CONNECT_JSON,
     CONF_RETIRED_UNICASTS,
     CONF_SG_MIN_LEVEL,
+    CONF_SG_PAIRINGS,
     CONF_SG_SWITCHES,
     CONTROLLED_MODEL_IDS,
     DOMAIN,
@@ -459,6 +460,15 @@ async def async_remove_device(
     for address in addresses:
         levels.pop(str(address), None)
     options[CONF_SG_MIN_LEVEL] = levels
+    # Every pairing to or from it: a removed switch was unpaired above (on
+    # button 4 only, as the menu pairs), and a removed dimmer is gone with its
+    # table. The record follows either way.
+    gone = set(addresses)
+    options[CONF_SG_PAIRINGS] = [
+        raw
+        for raw in options.get(CONF_SG_PAIRINGS, [])
+        if not (isinstance(raw, dict) and {raw.get("node"), raw.get("switch")} & gone)
+    ]
     options[CONF_RETIRED_UNICASTS] = sorted(
         {*options.get(CONF_RETIRED_UNICASTS, []), *addresses}
     )

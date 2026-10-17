@@ -207,3 +207,12 @@ def test_products():
     assert not on_off.dimmable and on_off.push_input
     # Unknown: taken for a dimmer, as every SG node has been so far.
     assert sg_product(0).dimmable
+
+
+def test_switch_products_are_told_from_outputs():
+    """A wheel not heard yet is still kept out of the dimmer lists."""
+    assert sg_product(0xB1).is_switch  # Smart Wireless 3.0, the wheel
+    assert sg_product(0xAF).is_switch and sg_product(0xB0).is_switch
+    assert not sg_product(0xA2).is_switch
+    assert not sg_product(0xAC).is_switch  # a plug is switched, it is no switch
+    assert not sg_product(0).is_switch  # unknown: taken for a dimmer, as before

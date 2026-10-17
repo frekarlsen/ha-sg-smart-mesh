@@ -76,7 +76,7 @@
       },
       "pair_switch": {
         "title": "Pair a wheel / switch",
-        "description": "The dimmer stores the pairing and reacts to the wheel directly, without Home Assistant. Pair one wheel to several dimmers by running this once per dimmer.",
+        "description": "The dimmer stores the pairing and reacts to the wheel directly, without Home Assistant. Pair one wheel to several dimmers by running this once per dimmer.\n\nPaired from Home Assistant (a pairing made in the SG app is not listed):\n{pairings}",
         "data": {
           "switch": "Wheel / switch",
           "node": "Dimmer",

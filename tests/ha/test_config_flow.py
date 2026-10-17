@@ -30,6 +30,9 @@ from custom_components.bluetooth_mesh.const import (
     CONF_CONNECT_JSON,
     CONF_INVERTED_CTL,
     CONF_KEEPALIVE,
+    CONF_SG_FADING,
+    CONF_SG_PAIRINGS,
+    CONF_SG_PUSH_SWITCH,
     CONF_SRC_ADDR,
     DOMAIN,
 )
@@ -506,6 +509,53 @@ async def test_options_flow_keeps_inverted_lamps_when_the_field_is_absent(
         await hass.async_block_till_done()
 
 
+async def test_options_flow_keeps_the_state_stored_beside_the_settings(
+    hass,
+) -> None:
+    """Saving connection settings keeps every option the form does not show.
+
+    The step used to copy a list of keys, and a key added after the list was
+    written was silently dropped on save: the fade-in and push-input values of
+    0.12.0rc2 were lost that way. Asserted with keys the step never names.
+    """
+    kept = {
+        CONF_SG_FADING: {"8": 20},
+        CONF_SG_PUSH_SWITCH: {"8": 2},
+        CONF_SG_PAIRINGS: [
+            {"node": 8, "switch": 7, "button": 4, "press": 10, "hold": 255, "rotate": 11}
+        ],
+        "a_key_from_a_later_version": [1],
+    }
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_CONNECT_JSON: _connect_text()},
+        options=dict(kept),
+        unique_id="0F0E0D0C-0B0A-0908-0706-050403020100",
+    )
+    entry.add_to_hass(hass)
+
+    with (
+        patch.object(coordinator_mod, "find_proxy_address", return_value=None),
+        patch.object(coordinator_mod, "discovered_proxies", return_value=[]),
+        patch.object(
+            coordinator_mod,
+            "async_register_proxy_callback",
+            return_value=lambda: None,
+        ),
+    ):
+        result = await _open_settings(hass, entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {CONF_KEEPALIVE: 30, CONF_SRC_ADDR: 0}
+        )
+        assert result["type"] is FlowResultType.CREATE_ENTRY
+        assert entry.options[CONF_KEEPALIVE] == 30
+        assert {key: entry.options[key] for key in kept} == kept
+
+        await hass.async_block_till_done()
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
 async def test_a_fresh_import_mirrors_no_lamp(hass) -> None:
     """A new entry says "no lamp inverted" in so many words.
 
@@ -717,6 +767,7 @@ async def test_pair_switch_menu_pairs_by_name(hass) -> None:
         ):
             result = await _pick(hass, entry, "pair_switch")
             assert result["step_id"] == "pair_switch"
+            assert result["description_placeholders"] == {"pairings": "–"}
             result = await _run(hass, result, {"switch": "0004", "node": "0003", "mode": "pair",
                  "press": "toggle_on_off", "rotate": "dim", "hold": "none"})
             assert result["reason"] == "paired"
@@ -728,6 +779,47 @@ async def test_pair_switch_menu_pairs_by_name(hass) -> None:
             assert result["reason"] == "unpaired"
             assert sent[-1] == (3, 4, 4, 0xFF, 0xFF, 0xFF)
 
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_pair_switch_dialog_lists_what_is_paired(hass) -> None:
+    """The dialog shows the pairings sent from here, by the names it offers."""
+    from custom_components.bluetooth_mesh import config_flow as flow_mod
+
+    entry = _menu_entry(hass)
+    pairing = {"button": 4, "press": 10, "hold": 255, "rotate": 11}
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            CONF_SG_PAIRINGS: [
+                {"node": 3, "switch": 4, **pairing},
+                {"node": 5, "switch": 4, **pairing},
+                {"node": 3, "switch": 4, **pairing, "button": 2},  # same pair: once
+            ]
+        },
+    )
+    with (
+        patch.object(coordinator_mod, "find_proxy_address", return_value=None),
+        patch.object(coordinator_mod, "discovered_proxies", return_value=[]),
+        patch.object(
+            coordinator_mod, "async_register_proxy_callback", return_value=lambda: None
+        ),
+    ):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        with patch.object(
+            flow_mod.BluetoothMeshOptionsFlow,
+            "_sg_nodes",
+            return_value=(
+                [(3, "Stue pille (0003)"), (5, "Kjøkken (0005)")],
+                [(4, "Hjul (0004)")],
+            ),
+        ):
+            result = await _pick(hass, entry, "pair_switch")
+        assert result["description_placeholders"]["pairings"] == (
+            "- Hjul (0004) → Kjøkken (0005)\n- Hjul (0004) → Stue pille (0003)"
+        )
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
 
