@@ -102,7 +102,14 @@ SG Smart 3.0 devices are standard Bluetooth SIG Mesh nodes (Telink stack,
 company ID `0x0EE8`) that do almost everything through one vendor model. The
 protocol — power/level, status, switch pairing, button events, device
 settings, product IDs — is documented in
-[docs/sg-smart-3-protocol.md](docs/sg-smart-3-protocol.md).
+[docs/sg-smart-3-protocol.md](docs/sg-smart-3-protocol.md). How it was worked
+out (the SG Smart app decompiled with blutter, where each command lives in it,
+and every hardware test, so the work can be repeated on a newer app or
+firmware) is in
+[docs/sg-smart-3-reverse-engineering.md](docs/sg-smart-3-reverse-engineering.md),
+with the first analysis of the app (in Norwegian) in
+[docs/sg-smart-app-report.nb.md](docs/sg-smart-app-report.nb.md). Neither
+contains SG code or binaries.
 
 A notable fix on the way, which also applies upstream: proxy configuration
 messages (the proxy filter) must be encrypted with the **proxy nonce**

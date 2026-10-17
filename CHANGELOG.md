@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-10-17
+
 ### Added
 
 - **SG Smart 3.0 dimmer settings**, under *Configuration* on the device page
@@ -28,6 +30,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the SG app, shows once it is paired again from Home Assistant. Removing a
   device drops its pairings from the record.
 - Norwegian (Bokmål) translation.
+- **How the protocol was worked out**, in
+  `docs/sg-smart-3-reverse-engineering.md`: getting an arm64 build of the SG
+  Smart app, decompiling its Dart code with blutter, where each command lives
+  in the app (with the kind bytes of the commands not used yet, as leads), and
+  every hardware test with its bytes. The first analysis of the app, in
+  Norwegian, is added unchanged as `docs/sg-smart-app-report.nb.md`. Neither
+  contains SG code or binaries.
 - `btmesh`: a request can match its reply on more than the opcode
   (`MeshNode.request(match=...)`). An SG node answers a status read, a trim
   read and every setting on one opcode, and publishes its own changes there
@@ -1119,6 +1128,7 @@ ESPHome Bluetooth proxy.
   made from the vendor app in parallel are not read back until HA's next
   command.
 
+[0.12.0]: https://github.com/frekarlsen/ha-sg-smart-mesh/releases/tag/v0.12.0
 [0.4.1]: https://github.com/dasimon135/ha-bluetooth-mesh/releases/tag/v0.4.1
 [0.4.0]: https://github.com/dasimon135/ha-bluetooth-mesh/releases/tag/v0.4.0
 [0.3.0]: https://github.com/dasimon135/ha-bluetooth-mesh/releases/tag/v0.3.0

@@ -8,7 +8,9 @@ SG Smart Wireless 3.0 dimmer wheels — unless marked otherwise.
 The implementation is [`src/btmesh/sg_smart.py`](../src/btmesh/sg_smart.py).
 
 This is an unofficial description. It is not endorsed by SG Armaturen AS and
-contains no SG code.
+contains no SG code. How it was worked out — the app decompile, where each
+command lives in it, and every hardware test — is in
+[`sg-smart-3-reverse-engineering.md`](sg-smart-3-reverse-engineering.md).
 
 ## The devices
 
@@ -207,9 +209,10 @@ from wheel `0x0007` (meaning of the last byte unknown).
 
 ### Also in the app, not mapped further
 
-`11` firmware version request, `32` clear all settings. The app sends every
-command to `0xFFFF` with the node in the payload, except kinds `0x35` and
-`0x38`.
+`11` firmware version request, `32` clear all settings, `23` remove a switch
+pairing. The app sends every command to `0xFFFF` with the node in the payload,
+except kinds `0x35` and `0x38`. More kinds, read from the app but never sent to
+a device, are listed in the reverse-engineering notes.
 
 ### Switch table read — kind `0x3A` (unanswered)
 
