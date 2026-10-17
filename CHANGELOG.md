@@ -6,6 +6,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **New integration icon**: the maintainer's SG Smart 3.0 house on red
+  replaces the generated mesh-of-lights motif. `scripts/make_icon.py`, which
+  drew the old one, is gone — running it would have overwritten the new icon.
+
 ## [0.11.0] — 2026-09-27
 
 First release of the **SG Smart 3.0** fork (frekarlsen/ha-sg-smart-mesh).
