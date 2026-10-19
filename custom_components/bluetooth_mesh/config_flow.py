@@ -187,8 +187,6 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
     _add_name = ""
     _add_result: dict | None = None
     _add_error = ""
-    _add_error_key = ""  # an error to show on the device list, once
-    _identify_task = None
     # The node added but not named yet: named with its default name if the
     # dialog is closed at the name step, so it does not stay out of HA.
     _unnamed: dict | None = None
@@ -415,21 +413,17 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
     async def async_step_add_device(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Pick an unprovisioned device HA can see: add it, or blink it first."""
+        """Pick an unprovisioned device HA can see, and add it."""
         from .provisioning import discovered_unprovisioned
 
         if getattr(self.config_entry, "runtime_data", None) is None:
             return self.async_abort(reason="not_loaded")
         errors: dict[str, str] = {}
-        if self._add_error_key:
-            errors["base"], self._add_error_key = self._add_error_key, ""
         if user_input is not None and user_input.get("device") not in (None, RESCAN):
             chosen = [b for b in self._beacons if b.address == user_input["device"]]
             if chosen:
                 self._add_beacon = chosen[0]
                 self._add_name = chosen[0].name or chosen[0].address
-                if user_input.get("identify"):
-                    return await self.async_step_add_device_identify()
                 return await self.async_step_add_device_run()
         self._beacons = discovered_unprovisioned(self.hass)
         if not self._beacons:
@@ -449,53 +443,9 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
                         mode=SelectSelectorMode.LIST,
                     )
                 ),
-                vol.Optional("identify", default=False): BooleanSelector(),
             }
         )
         return self.async_show_form(step_id="add_device", data_schema=schema, errors=errors)
-
-    async def async_step_add_device_identify(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """Ask the chosen device to blink before anything is added."""
-        from .provisioning import async_identify_unprovisioned
-
-        # Progress is always shown first, even for a task that is already done
-        # (HA runs tasks eagerly): moving on in the same call would hand this
-        # step's form input to the next step.
-        fresh = self._identify_task is None
-        if fresh:
-            self._identify_task = self.hass.async_create_task(
-                async_identify_unprovisioned(self.hass, self._add_beacon),
-                "bluetooth_mesh identify device",
-            )
-        if fresh or not self._identify_task.done():
-            return self.async_show_progress(
-                step_id="add_device_identify",
-                progress_action="identifying",
-                progress_task=self._identify_task,
-                description_placeholders={"name": self._add_name},
-            )
-        task, self._identify_task = self._identify_task, None
-        try:
-            answered = task.result()
-        except Exception as exc:  # noqa: BLE001 - a lost link is "no answer"
-            logger.debug("identify %s: %s", self._add_beacon.address, exc)
-            answered = False
-        if not answered:
-            self._add_error_key = "identify_no_answer"
-            return self.async_show_progress_done(next_step_id="add_device")
-        return self.async_show_progress_done(next_step_id="add_device_identified")
-
-    async def async_step_add_device_identified(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
-        """It answered: add this one, or go back and try the next."""
-        return self.async_show_menu(
-            step_id="add_device_identified",
-            menu_options=["add_device_run", "add_device"],
-            description_placeholders={"name": self._add_name},
-        )
 
     async def async_step_add_device_run(
         self, user_input: dict[str, Any] | None = None
@@ -513,7 +463,10 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
                 await self._blink(summary["unicast"])
             return summary
 
-        fresh = self._add_task is None  # see async_step_add_device_identify
+        # Progress is always shown first, even for a task that is already done
+        # (HA runs tasks eagerly): moving on in the same call would hand this
+        # step's form input on to the name step, which would save it at once.
+        fresh = self._add_task is None
         if fresh:
             self._add_task = self.hass.async_create_task(
                 add_and_show(), "bluetooth_mesh add device"

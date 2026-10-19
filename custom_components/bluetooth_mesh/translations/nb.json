@@ -62,28 +62,13 @@
       },
       "add_device": {
         "title": "Legg til en enhet",
-        "description": "Enheter HA har hørt som er fabrikktilbakestilt og venter på oppsett, sist hørt først. Flere av samme type? Kryss av for **Blink først** for å få den valgte til å blinke før noe legges til (hvis fastvaren viser det). En lampe blinker også tre ganger rett etter at den er lagt til, og da gir du den navn. En batterienhet (dimmehjul, bryter) melder seg bare kort etter at den er vekket eller tilbakestilt: vekk den, velg «Søk igjen» og trykk Send. Det er oppføringen som ble sett for noen sekunder siden. Mens en enhet legges til, fortsett å trykke på den: hjulet eller bryteren, eller dimmerens knapp (av/på eller R).",
+        "description": "Enheter HA har hørt som er fabrikktilbakestilt og venter på oppsett, sist hørt først. Flere av samme type? Velg hvilken som helst: en lampe blinker tre ganger så snart den er lagt til, og da gir du den navn – deretter legger du til den neste. En batterienhet (dimmehjul, bryter) melder seg bare kort etter at den er vekket eller tilbakestilt: vekk den, velg «Søk igjen» og trykk Send. Det er oppføringen som ble sett for noen sekunder siden. Mens en enhet legges til, fortsett å trykke på den: hjulet eller bryteren, eller dimmerens knapp (av/på eller R).",
         "data": {
-          "device": "Enhet",
-          "identify": "Blink først, ikke legg til ennå"
-        },
-        "data_description": {
-          "identify": "Den valgte enheten blir bedt om å blinke i 10 sekunder, på standard Bluetooth Mesh-vis (som Identify i nRF Mesh). Ingenting legges til. Ikke all fastvare viser det."
-        }
-      },
-      "add_device_identify": {
-        "title": "Ber {name} om å blinke"
-      },
-      "add_device_identified": {
-        "title": "Blinket riktig lampe?",
-        "description": "{name} svarte og ble bedt om å blinke i 10 sekunder. Er det lampen du vil ha, legger du den til nå. Blinket ingenting, viser ikke fastvaren det: legg den til likevel, for en lampe blinker rett etter at den er lagt til, før du gir den navn.",
-        "menu_options": {
-          "add_device_run": "Legg til denne enheten",
-          "add_device": "Tilbake til listen"
+          "device": "Enhet"
         }
       },
       "add_device_run": {
-        "title": "Legger til {name}"
+        "title": "Legger til en enhet"
       },
       "add_device_name": {
         "title": "Gi den nye enheten navn",
@@ -133,13 +118,11 @@
     },
     "progress": {
       "adding": "Setter opp {name}: provisjonering, deretter konfigurering. Dette tar opptil to minutter. Fortsett å trykke på enheten mens det pågår: hjulet eller bryteren, eller dimmerens knapp (av/på eller R). En lampe blinker tre ganger når den er inne.",
-      "removing": "Tilbakestiller {name}. For en batterienhet: fortsett å trykke eller vri på den. Dette tar opptil ett minutt.",
-      "identifying": "Ber {name} om å blinke i 10 sekunder. Se etter lampen som blinker."
+      "removing": "Tilbakestiller {name}. For en batterienhet: fortsett å trykke eller vri på den. Dette tar opptil ett minutt."
     },
     "error": {
       "no_devices": "Fant ingen enhet som venter på oppsett. Fabrikktilbakestill enheten (SG: tilbakestillingen i manualen), sørg for at den er nær en Bluetooth-proxy, og trykk Send for å søke igjen.",
-      "send_failed": "Kommandoen kunne ikke sendes: er meshet tilkoblet?",
-      "identify_no_answer": "Enheten svarte ikke. Sjekk at den har strøm og er nær en Bluetooth-proxy, eller velg «Søk igjen»."
+      "send_failed": "Kommandoen kunne ikke sendes: er meshet tilkoblet?"
     },
     "abort": {
       "backup_written": "Nettverket (nøkler, noder og enhetsnøkler) ble skrevet til {path}. Ta vare på en kopi et trygt sted: uten den må alle enheter fabrikktilbakestilles hvis denne Home Assistant går tapt. Den kan importeres igjen med Rekonfigurer.",
@@ -173,6 +156,9 @@
     },
     "sg_setting_not_confirmed": {
       "message": "Dimmeren {unicast} bekreftet ikke innstillingen. Den kan være utenfor rekkevidde; prøv igjen."
+    },
+    "sg_identify_failed": {
+      "message": "Fikk ikke kontakt med lampen på {unicast} for å blinke. Den kan være utenfor rekkevidde; prøv igjen."
     }
   },
   "entity": {

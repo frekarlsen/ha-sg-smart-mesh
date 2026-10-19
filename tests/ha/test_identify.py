@@ -1,10 +1,9 @@
-"""Telling identical new devices apart: blink first, or blink once added."""
+"""Telling identical lamps apart: they blink once added, and on Identify."""
 
 from __future__ import annotations
 
 import dataclasses
 import json
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -15,26 +14,24 @@ pytest.importorskip("pytest_homeassistant_custom_component")
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from .test_coordinator import FakeController, _make_entry, _patch_transport
-from custom_components.bluetooth_mesh import provisioning as prov_mod
 from custom_components.bluetooth_mesh.btmesh.access import (
     CompositionData,
     CompositionElement,
 )
 from custom_components.bluetooth_mesh.btmesh.sg_smart import SgStatus
+from custom_components.bluetooth_mesh.button import SgIdentifyButton
 from custom_components.bluetooth_mesh.const import CONF_CONNECT_JSON, DOMAIN
 from custom_components.bluetooth_mesh.coordinator import MeshCoordinator
 from custom_components.bluetooth_mesh.provisioning import (
     UnprovisionedBeacon,
     _default_name,
     async_finish_add,
-    async_identify_unprovisioned,
     rename_node,
 )
 
 BEACON = UnprovisionedBeacon(
     address="AA:BB:CC:DD:EE:01", uuid=bytes(range(16)), name="SG", rssi=-50
 )
-CAPABILITIES = bytes.fromhex("01" + "0100010000000000000000")
 
 
 # ------------------------------------------------- blink once added (SG)
@@ -73,39 +70,6 @@ async def test_a_lamp_that_did_not_say_is_left_on(hass) -> None:
     assert await _blinks(hass, None) == [0, 100, 0, 100, 101]
 
 
-# ------------------------------------------------ blink before it is added
-
-
-def _fake_link(answer: bool, sent: list):
-    @asynccontextmanager
-    async def link(hass, beacon, on_pdu, on_error):
-        def send(pdu: bytes) -> None:
-            sent.append(pdu)
-            if answer and pdu[0] == 0x00:  # Invite -> Capabilities
-                hass.loop.call_soon(on_pdu, CAPABILITIES)
-
-        yield send
-
-    return link
-
-
-async def test_blink_first_sends_an_invite_with_attention_and_adds_nothing(hass) -> None:
-    sent: list = []
-    with patch.object(prov_mod, "_prov_link", _fake_link(True, sent)):
-        assert await async_identify_unprovisioned(hass, BEACON, seconds=1)
-    # Only the Invite: no Start, no keys, nothing provisioned.
-    assert sent == [bytes([0x00, 1])]
-
-
-async def test_blink_first_reports_a_device_that_does_not_answer(hass) -> None:
-    sent: list = []
-    with (
-        patch.object(prov_mod, "_prov_link", _fake_link(False, sent)),
-        patch.object(prov_mod, "IDENTIFY_ANSWER_TIMEOUT", 0.05),
-    ):
-        assert not await async_identify_unprovisioned(hass, BEACON, seconds=1)
-
-
 # ------------------------------------------------------------ the name
 
 
@@ -136,3 +100,43 @@ async def test_the_name_given_is_stored_and_the_entry_reloaded(hass) -> None:
     reload.assert_awaited_once_with(entry.entry_id)
     # And the input is left alone.
     assert rename_node(data, 0x0099, "x") == data
+
+
+# ------------------------------------------------------- the Identify button
+
+
+class _Node:
+    unicast = 8
+
+    def element_for_model(self, _model):
+        return None
+
+
+class _Coord:
+    available = True
+
+    def __init__(self, sent: bool = True):
+        self.network = type("N", (), {"identifier": "net"})()
+        self.blinked: list[int] = []
+        self._sent = sent
+
+    async def async_sg_identify(self, unicast):
+        self.blinked.append(unicast)
+        return self._sent
+
+
+async def test_identify_blinks_the_lamp() -> None:
+    coord = _Coord()
+    button = SgIdentifyButton(coord, _Node())
+    assert button.unique_id == "net_0008_identify"
+    assert button.device_class == "identify"
+    await button.async_press()
+    assert coord.blinked == [8]
+
+
+async def test_identify_says_so_when_the_lamp_cannot_be_reached() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    with pytest.raises(HomeAssistantError) as err:
+        await SgIdentifyButton(_Coord(sent=False), _Node()).async_press()
+    assert err.value.translation_key == "sg_identify_failed"

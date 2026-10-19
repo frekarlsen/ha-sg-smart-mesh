@@ -31,8 +31,6 @@ from homeassistant.core import HomeAssistant
 
 from .btmesh.access import CompositionData
 from .btmesh.bearer import PROV_SERVICE, GattBearer, parse_unprovisioned_service_data
-from .btmesh.prov_pdu import Capabilities, Invite
-from .btmesh.prov_pdu import decode as decode_prov_pdu
 from .btmesh.provisioner import Provisioner
 from .btmesh.proxy_pdu import MSG_TYPE_PROVISIONING_PDU
 from .btmesh.pump import BearerPump
@@ -232,46 +230,6 @@ async def async_provision(
         num_elements=max(1, prov.capabilities.num_elements),
         uuid=beacon.uuid,
     )
-
-
-# Long enough to look round a room for it; short enough to try the next one.
-IDENTIFY_SECONDS = 10
-# A device in reach answers the Invite at once; give a proxy link a moment.
-IDENTIFY_ANSWER_TIMEOUT = 15.0
-
-
-async def async_identify_unprovisioned(
-    hass: HomeAssistant, beacon: UnprovisionedBeacon, seconds: int = IDENTIFY_SECONDS
-) -> bool:
-    """Ask a device that is not added yet to draw attention to itself.
-
-    The standard way (nRF Mesh's *Identify*): open a provisioning link, send
-    Invite with an attention time, and hold the link that long. Nothing is
-    added; on disconnect the device is unprovisioned as before. True if the
-    device answered (Capabilities) — whether it also blinks is up to its
-    firmware: the SG app sends no attention time and identifies a device after
-    adding it instead, which :func:`async_add_device` does too.
-    """
-    answered = asyncio.Event()
-
-    def on_pdu(payload: bytes) -> None:
-        try:
-            if isinstance(decode_prov_pdu(payload), Capabilities):
-                answered.set()
-        except Exception:  # noqa: BLE001 - only the answer matters here
-            return
-
-    async with _prov_link(hass, beacon, on_pdu, lambda _exc: None) as send:
-        # The Invite alone, not a Provisioner: that would go on to Start and
-        # the key exchange the moment Capabilities came back.
-        send(Invite(attention_duration=seconds).encode())
-        try:
-            await asyncio.wait_for(answered.wait(), IDENTIFY_ANSWER_TIMEOUT)
-        except TimeoutError:
-            return False
-        # Hold the link: a device may end its attention when the link goes.
-        await asyncio.sleep(seconds)
-    return True
 
 
 # --------------------------------------------------------- the stored network

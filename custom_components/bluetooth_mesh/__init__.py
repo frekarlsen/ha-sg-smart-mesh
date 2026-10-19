@@ -16,6 +16,7 @@ from .coordinator import MeshCoordinator
 from .services import async_register_services
 
 PLATFORMS: list[Platform] = [
+    Platform.BUTTON,
     Platform.EVENT,
     Platform.LIGHT,
     Platform.NUMBER,

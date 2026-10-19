@@ -8,21 +8,27 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **Telling identical new devices apart** in *Configure → Add a device*:
-  - a lamp blinks three times as soon as it is added, and its name is asked
-    only then (with *Blink again*), so the name goes to the lamp that blinked.
-    Its entities are created after it is named and take their ids from the
-    name. This is how the SG app identifies a new device
-    (`blinkForIdentification`, plain power commands);
-  - *Blink first* asks a device to blink before anything is added: a
-    provisioning Invite with a 10 s attention time, as *Identify* in nRF Mesh.
-    Whether it blinks is up to the firmware — the SG app itself sends no
-    attention time — so the blink after adding is the one to rely on.
+- **Telling identical lamps apart.** In *Configure → Add a device* a lamp
+  blinks three times as soon as it is added, and its name is asked only then
+  (with *Blink again*), so the name goes to the lamp that blinked. Its
+  entities are created after it is named and take their ids from the name.
+  Every SG device page also gets an **Identify** button that blinks it the
+  same way. Both use SG's own power commands, as the SG app does
+  (`blinkForIdentification`): off and full on three times, then back to the
+  state read before.
 
 ### Changed
 
 - *Add a device* no longer asks for the name before adding; a device closed
   at the name step still goes in, under its product name and address.
+
+### Not added
+
+- Blinking a device *before* adding it, the standard Bluetooth Mesh way (a
+  provisioning Invite with an attention time, as *Identify* in nRF Mesh), was
+  built in 0.13.0rc1 and taken out again: a Pill Micro 3.0 (firmware `0x0041`)
+  showed nothing on 2026-10-19. The SG app's own Telink SDK sends no attention
+  time either.
 
 ## [0.12.0] — 2026-10-17
 

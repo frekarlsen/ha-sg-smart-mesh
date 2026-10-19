@@ -123,9 +123,12 @@ It identifies a device with plain power commands instead
 the same right after adding a lamp: off and full on three times, then back to
 the state read before.
 
-*Blink first* in the add dialog sends `Invite` with a 10 s attention time and
-stops at the device's Capabilities (nothing is provisioned). Whether an SG
-device shows the attention is not known yet.
+The same blink is on every SG device page as *Identify*.
+
+The standard way to identify a device that is not added yet — `Invite` with an
+attention time, as *Identify* in nRF Mesh — showed nothing on a Pill Micro 3.0
+(firmware `0x0041`) asked for 10 s on 2026-10-19, which fits the SG app never
+sending one. A device can therefore only be told apart once it is added.
 
 ## Button events — kind `0x2A`
 

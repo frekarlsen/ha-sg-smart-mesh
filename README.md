@@ -62,11 +62,10 @@ devices from Home Assistant alone.
   dimmers can act on it. A battery device only announces itself for a moment
   after it is woken — wake it, then choose *Search again*.
 
-  Several identical devices waiting? A lamp **blinks three times** as soon as
-  it is added, and is named only then, so the name goes to the lamp you saw
-  (*Blink again* repeats it). *Blink first* asks the chosen device to blink
-  before anything is added, the standard Bluetooth Mesh way; whether it shows
-  that depends on its firmware.
+  Several identical devices waiting? Pick any of them: a lamp **blinks three
+  times** as soon as it is added, and is named only then, so the name goes to
+  the lamp you saw (*Blink again* repeats it). Then add the next. Later, the
+  **Identify** button on an SG device's page blinks it the same way.
 - **Pair a wheel / switch to a dimmer** — pick both by name and what a short
   press, a turn and a hold should do. The dimmer stores the pairing. One wheel
   can drive several dimmers: pair it with each. The dialog lists what is
