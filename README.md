@@ -66,6 +66,11 @@ devices from Home Assistant alone.
   times** as soon as it is added, and is named only then, so the name goes to
   the lamp you saw (*Blink again* repeats it). Then add the next. Later, the
   **Identify** button on an SG device's page blinks it the same way.
+
+  A wheel that slept through its configuration is not lost: *Try again* on
+  the name step, or *⚙ Finish setting up* in this list later, configures it
+  without resetting it — keep turning it meanwhile. If it does not answer
+  through the lamp HA is connected through, HA tries the others.
 - **Pair a wheel / switch to a dimmer** — pick both by name and what a short
   press, a turn and a hold should do. The dimmer stores the pairing. One wheel
   can drive several dimmers: pair it with each. The dialog lists what is

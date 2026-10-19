@@ -17,10 +17,24 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`blinkForIdentification`): off and full on three times, then back to the
   state read before.
 
+- **A device that did not answer its configuration can be finished**, not
+  reset and added again: the name step offers *Try again*, and *Add a device*
+  lists every node provisioned but never configured as *⚙ Finish setting up*.
+  Its stored name is kept, and it is registered (a wheel as a switch) once it
+  answers. The `configure_node` action alone did not record what the node is,
+  so a wheel configured that way never got a device page.
+
 ### Changed
 
 - *Add a device* no longer asks for the name before adding; a device closed
   at the name step still goes in, under its product name and address.
+- **Configuring a node tries other ways in.** When it does not answer through
+  the proxy node HA is connected through within 20 s, HA moves to another one
+  and keeps going for the rest of the 90 s. On 2026-10-19 a wheel configured at
+  once through one pill, and the next three stayed silent through the pill HA
+  had moved to once more pills were added: a battery wheel listens for a
+  moment after each press only, and a relayed message comes too late. Which
+  pill HA enters the mesh through is still the first one the scan lists.
 
 ### Not added
 

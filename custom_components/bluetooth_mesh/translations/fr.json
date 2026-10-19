@@ -62,7 +62,7 @@
       },
       "add_device": {
         "title": "Ajouter un appareil",
-        "description": "Appareils réinitialisés entendus par HA, les plus récents en premier. Plusieurs du même type ? Choisissez-en un : une lampe clignote trois fois dès son ajout, et vous la nommez à ce moment-là, puis ajoutez la suivante. Un appareil sur pile ne s'annonce que brièvement après réveil ou réinitialisation : réveillez-le, choisissez « Search again » et validez. C'est l'entrée vue il y a quelques secondes. Pendant l'ajout, continuez à actionner l'appareil : la molette ou l'interrupteur, ou le bouton du variateur (power ou R).",
+        "description": "Appareils réinitialisés entendus par HA, les plus récents en premier. Plusieurs du même type ? Choisissez-en un : une lampe clignote trois fois dès son ajout, et vous la nommez à ce moment-là, puis ajoutez la suivante. Un appareil sur pile ne s'annonce que brièvement après réveil ou réinitialisation : réveillez-le, choisissez « Search again » et validez. C'est l'entrée vue il y a quelques secondes. Pendant l'ajout, continuez à actionner l'appareil : la molette ou l'interrupteur, ou le bouton du variateur (power ou R). Un appareil ajouté mais qui n'a pas répondu à sa configuration apparaît comme ⚙ Finish setting up : choisissez-le en l'actionnant.",
         "data": {
           "device": "Appareil"
         }
@@ -92,6 +92,18 @@
           "name": "Nom de l'appareil dans Home Assistant"
         }
       },
+      "add_device_name_unconfigured": {
+        "title": "L'appareil n'a pas répondu",
+        "description": "{unicast} fait partie du réseau mais n'a pas répondu à sa configuration ({error}). Continuez à l'actionner, laissez **Réessayer** coché et validez : Home Assistant essaie aussi de le joindre par d'autres lampes. Ou décochez pour enregistrer le nom maintenant et le terminer plus tard depuis *Ajouter un appareil* (⚙ Finish setting up).",
+        "data": {
+          "name": "Nom",
+          "retry": "Réessayer"
+        },
+        "data_description": {
+          "name": "Nom de l'appareil dans Home Assistant",
+          "retry": "Le configurer à nouveau maintenant (jusqu'à 90 secondes) au lieu d'enregistrer et fermer"
+        }
+      },
       "pair_switch": {
         "title": "Associer une molette / un interrupteur",
         "description": "Le variateur mémorise l'association et réagit directement à la molette, sans Home Assistant. Pour une molette et plusieurs variateurs, répétez l'opération pour chaque variateur.\n\nAssociations faites depuis Home Assistant (celles faites dans l'application SG n'apparaissent pas) :\n{pairings}",
@@ -117,8 +129,9 @@
       }
     },
     "progress": {
-      "adding": "Configuration de {name} : provisionnement puis configuration. Jusqu'à deux minutes. Continuez à actionner l'appareil : la molette ou l'interrupteur, ou le bouton du variateur (power ou R). Une lampe clignote trois fois une fois ajoutée.",
-      "removing": "Réinitialisation de {name}. Pour un appareil sur pile, continuez à l'actionner. Jusqu'à une minute."
+      "adding": "Configuration de {name} : provisionnement puis configuration. Jusqu'à deux minutes. Continuez à actionner l'appareil : la molette ou l'interrupteur, ou le bouton du variateur (power ou R). Une lampe clignote trois fois une fois ajoutée. Si une molette ne répond pas par une lampe, Home Assistant essaie la suivante.",
+      "removing": "Réinitialisation de {name}. Pour un appareil sur pile, continuez à l'actionner. Jusqu'à une minute.",
+      "configuring": "Configuration de {name}. Jusqu'à 90 secondes. Continuez à actionner l'appareil pendant ce temps. S'il ne répond pas par une lampe, Home Assistant essaie la suivante."
     },
     "error": {
       "no_devices": "Aucun appareil en attente de configuration n'a été trouvé. Réinitialisez l'appareil, placez-le près d'un proxy Bluetooth, puis validez pour relancer la recherche.",
@@ -128,7 +141,7 @@
       "backup_written": "Le réseau (clés, nœuds et clés d'appareil) a été écrit dans {path}. Conservez-en une copie en lieu sûr : sans elle, tous les appareils devront être réinitialisés si ce Home Assistant est perdu. Elle peut être réimportée avec Reconfigurer.",
       "device_added": "{name} a été ajouté à l'adresse {unicast}.",
       "device_added_switch": "{name} a été ajouté à l'adresse {unicast}. Ses entités bouton et pile apparaissent dès sa première utilisation. Associez-le à un variateur avec l'action bluetooth_mesh.pair_switch.",
-      "device_added_unconfigured": "{name} a été provisionné à l'adresse {unicast} mais n'a pas répondu à la configuration ({error}). Ses clés sont enregistrées. Réveillez-le et lancez l'action bluetooth_mesh.configure_node pour {unicast}.",
+      "device_added_unconfigured": "{name} fait partie du réseau à l'adresse {unicast} mais n'est pas encore configuré ({error}). Ses clés sont enregistrées. Terminez-le depuis Configurer → Ajouter un appareil → ⚙ Finish setting up, en l'actionnant.",
       "add_device_failed": "L'appareil n'a pas pu être ajouté : {error}. Il ne fait pas partie du réseau ; réinitialisez-le et réessayez.",
       "not_loaded": "L'intégration doit être en marche (connectée au mesh) pour ajouter un appareil.",
       "paired": "{switch} commande maintenant {node}. Essayez : cela fonctionne sans Home Assistant.",

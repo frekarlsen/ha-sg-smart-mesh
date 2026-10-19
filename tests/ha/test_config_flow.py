@@ -746,7 +746,7 @@ async def test_add_device_lists_beacons_and_runs_to_the_end(hass) -> None:
             assert added == [beacon.address]
             assert blink.await_args_list[0].args == (5,)
             assert result["step_id"] == "add_device_name"
-            assert result["description_placeholders"] == {"unicast": "0x0005"}
+            assert result["description_placeholders"]["unicast"] == "0x0005"
 
             result = await hass.config_entries.options.async_configure(
                 result["flow_id"], {"name": "Stue", "blink_again": True}
@@ -954,5 +954,102 @@ async def test_remove_device_menu_runs_the_removal(hass) -> None:
                 )
         assert result["reason"] == "device_removed"
         assert removed == [(4, False)]
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_a_device_that_did_not_answer_can_be_tried_again_then_named(hass) -> None:
+    """A wheel asleep through its configuration: Try again, from the name step."""
+    from custom_components.bluetooth_mesh import provisioning as prov_mod
+
+    entry = _menu_entry(hass)
+    beacon = _beacon()
+    configured, finished = [], []
+
+    async def fake_add(hass_, entry_, beacon_):
+        return {"name": "SG 0012", "unicast": 0x12, "configured": False,
+                "can_blink": False, "error": "no Composition Data reply"}
+
+    async def fake_configure(hass_, entry_, unicast, **kw):
+        configured.append(unicast)
+        return {"name": "Dimmehjul_07", "unicast": unicast, "configured": True,
+                "kind": "switch", "can_blink": False}
+
+    async def fake_finish(hass_, entry_, unicast, name):
+        finished.append((unicast, name))
+
+    a, b, c = _patch_mesh()
+    with a, b, c:
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        with (
+            patch.object(prov_mod, "discovered_unprovisioned", return_value=[beacon]),
+            patch.object(prov_mod, "async_add_device", fake_add),
+            patch.object(prov_mod, "async_configure_added", fake_configure),
+            patch.object(prov_mod, "async_finish_add", fake_finish),
+        ):
+            result = await _pick(hass, entry, "add_device")
+            result = await _finish_progress(
+                hass,
+                await hass.config_entries.options.async_configure(
+                    result["flow_id"], {"device": beacon.address}
+                ),
+            )
+            assert result["step_id"] == "add_device_name_unconfigured"
+            assert result["description_placeholders"]["error"] == "no Composition Data reply"
+            result = await _finish_progress(
+                hass,
+                await hass.config_entries.options.async_configure(
+                    result["flow_id"], {"name": "Dimmehjul_07", "retry": True}
+                ),
+            )
+            assert configured == [0x12]
+            assert result["step_id"] == "add_device_name_quiet"
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], {"name": "Dimmehjul_07"}
+            )
+        assert result["reason"] == "device_added_switch"
+        assert finished == [(0x12, "Dimmehjul_07")]
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_a_node_left_unconfigured_is_listed_to_finish(hass) -> None:
+    """Provisioned earlier but never configured: finished, not reset and re-added."""
+    from custom_components.bluetooth_mesh import provisioning as prov_mod
+
+    entry = _menu_entry(hass)
+    configured = []
+
+    async def fake_configure(hass_, entry_, unicast, **kw):
+        configured.append(unicast)
+        return {"name": "Dimmehjul_06", "unicast": unicast, "configured": True,
+                "kind": "switch", "can_blink": False}
+
+    async def fake_finish(hass_, entry_, unicast, name):
+        pass
+
+    a, b, c = _patch_mesh()
+    with a, b, c:
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        with (
+            patch.object(prov_mod, "discovered_unprovisioned", return_value=[]),
+            patch.object(prov_mod, "unfinished_nodes", return_value=[(0x11, "Dimmehjul_06")]),
+            patch.object(prov_mod, "async_configure_added", fake_configure),
+            patch.object(prov_mod, "async_finish_add", fake_finish),
+        ):
+            result = await _pick(hass, entry, "add_device")
+            # Listed even with nothing new to add.
+            assert result["type"] is FlowResultType.FORM
+            assert result["errors"] == {}
+            result = await _finish_progress(
+                hass,
+                await hass.config_entries.options.async_configure(
+                    result["flow_id"], {"device": "finish:0011"}
+                ),
+            )
+            assert configured == [0x11]
+            assert result["step_id"] == "add_device_name_quiet"
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()

@@ -111,6 +111,10 @@ SIGNAL_NEW_SG_SWITCH = "bluetooth_mesh_new_sg_switch_{}"
 # changes; carries (old, new) so the light can keep its apparent brightness.
 SIGNAL_SG_MIN_LEVEL = "bluetooth_mesh_sg_min_level_{}_{}"
 
+# While configuring a node, how long to try through one proxy node before
+# moving to another (see MeshCoordinator._async_try_other_proxy).
+CONFIGURE_SECONDS_PER_PROXY = 20.0
+
 # Dispatcher signal (entry id) when a pairing has been sent or removed, so the
 # "controlled by" / "controls" sensors on both ends of it update.
 SIGNAL_SG_PAIRINGS = "bluetooth_mesh_sg_pairings_{}"
@@ -353,6 +357,9 @@ class MeshCoordinator:
         # three number entities ask at once and one read answers them all.
         self._sg_trim: dict[int, SgTrimLevels] = {}
         self._sg_trim_reads: dict[int, asyncio.Task] = {}
+        # Proxy nodes to pass over while configuring a node that did not
+        # answer through them (see _async_try_other_proxy).
+        self._proxy_avoid: set[str] = set()
 
     # ------------------------------------------------ derived from the export
 
@@ -712,11 +719,17 @@ class MeshCoordinator:
             # cannot report by raising). Drop it and reconnect below.
             await self._teardown()
 
+        max_age = None if self._held_the_slot_recently() else PROXY_ADVERT_MAX_AGE
+        avoid = {"exclude": set(self._proxy_avoid)} if self._proxy_avoid else {}
         address = find_proxy_address(
-            self.hass,
-            self._network.net_key,
-            max_age=None if self._held_the_slot_recently() else PROXY_ADVERT_MAX_AGE,
+            self.hass, self._network.net_key, max_age=max_age, **avoid
         )
+        if address is None and self._proxy_avoid:
+            # Passing nodes over is a preference, never a reason to be cut off.
+            self._proxy_avoid.clear()
+            address = find_proxy_address(
+                self.hass, self._network.net_key, max_age=max_age
+            )
         if address is None:
             seen = discovered_proxies(self.hass)
             # Nothing hears the node any more, so the streak of refusals no
@@ -1445,6 +1458,47 @@ class MeshCoordinator:
                 return result
             await asyncio.sleep(0.2)
 
+    async def _async_try_other_proxy(self) -> bool:
+        """Move the held link to another proxy node, if there is one.
+
+        Which node HA enters the mesh through is whichever the scan lists
+        first. A pill answers through any of them, the mesh relays for it; a
+        battery wheel listens for a moment after each press only, and a message
+        that has to be relayed there arrives too late. On 2026-10-19 a wheel
+        configured at once through one node (40:2F:51:A2:05:40), and three
+        wheels after it stayed silent for 90 s each through the node HA had
+        moved to (…10:53) once more pills were added. False when there is no
+        other node to try.
+        """
+        async with self._lock:
+            current = self._proxy_address
+            if current is None:
+                return False
+            other = find_proxy_address(
+                self.hass,
+                self._network.net_key,
+                exclude={*self._proxy_avoid, current},
+            )
+            if other is None or other.upper() == current.upper():
+                return False
+            logger.info(
+                "no answer through mesh proxy %s; trying %s instead", current, other
+            )
+            self._proxy_avoid.add(current)
+            await self._teardown()
+            return True
+
+    async def _retry_any_proxy(self, step, *, deadline: float, per_proxy: float):
+        """:meth:`_retry`, moving to another proxy node every ``per_proxy`` s."""
+        loop = asyncio.get_running_loop()
+        while True:
+            result = await self._retry(
+                step, deadline=min(deadline, loop.time() + per_proxy)
+            )
+            if result is not None or loop.time() >= deadline:
+                return result
+            await self._async_try_other_proxy()
+
     async def async_get_composition_retry(self, unicast: int, seconds: float = 30):
         deadline = asyncio.get_running_loop().time() + seconds
         return await self._retry(
@@ -1474,18 +1528,28 @@ class MeshCoordinator:
         is paired with act on its events directly; anything else publishes its
         status to :data:`SG_STATUS_GROUP` for HA.
         """
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + seconds
-        kw = {"timeout": 1.5, "retries": 2}
+        deadline = asyncio.get_running_loop().time() + seconds
         report: dict = {"unicast": f"0x{unicast:04x}"}
 
-        comp = await self._retry(
-            lambda c: c.get_composition(unicast, timeout=1.5), deadline=deadline
-        )
-        if comp is None:
-            report["error"] = "no Composition Data reply (node asleep or unreachable)"
-            return report, None
-        report["composition"] = comp.describe()
+        # The first answer may need another way in (a battery node); every
+        # step after it stays on the node that got it.
+        try:
+            comp = await self._retry_any_proxy(
+                lambda c: c.get_composition(unicast, timeout=1.5),
+                deadline=deadline, per_proxy=CONFIGURE_SECONDS_PER_PROXY,
+            )
+            if comp is None:
+                report["error"] = "no Composition Data reply (node asleep or unreachable)"
+                return report, None
+            report["composition"] = comp.describe()
+            report["proxy"] = self._proxy_address
+            return await self._configure_rest(unicast, comp, report, deadline, publish)
+        finally:
+            self._proxy_avoid.clear()
+
+    async def _configure_rest(self, unicast, comp, report, deadline, publish):
+        """AppKey, bindings and publication, once the node has answered."""
+        kw = {"timeout": 1.5, "retries": 2}
 
         status = await self._retry(
             lambda c: c.add_app_key(unicast, **kw), deadline=deadline

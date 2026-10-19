@@ -62,7 +62,7 @@
       },
       "add_device": {
         "title": "Add a device",
-        "description": "Devices HA has heard that are factory reset and waiting to be set up, most recently heard first. Several of the same kind? Pick any of them: a lamp blinks three times as soon as it is added, and you name it then — then add the next. A battery device (dimmer wheel, switch) only announces itself briefly after it is woken or reset: wake it, then choose \"Search again\" and Submit. It is the entry seen a few seconds ago. While a device is being added, keep pressing it: the wheel or switch, or the dimmer's button (power or R).",
+        "description": "Devices HA has heard that are factory reset and waiting to be set up, most recently heard first. Several of the same kind? Pick any of them: a lamp blinks three times as soon as it is added, and you name it then — then add the next. A battery device (dimmer wheel, switch) only announces itself briefly after it is woken or reset: wake it, then choose \"Search again\" and Submit. It is the entry seen a few seconds ago. While a device is being added, keep pressing it: the wheel or switch, or the dimmer's button (power or R). A device that was added but did not answer its configuration is listed as ⚙ Finish setting up: choose it while pressing or turning it.",
         "data": {
           "device": "Device"
         }
@@ -92,6 +92,18 @@
           "name": "What the device is called in Home Assistant"
         }
       },
+      "add_device_name_unconfigured": {
+        "title": "The device did not answer",
+        "description": "{unicast} is in the network but did not answer its configuration ({error}). Keep pressing or turning it, leave **Try again** ticked and submit: Home Assistant also tries reaching it through other lamps. Or untick it to save the name now and finish it later from *Add a device* (⚙ Finish setting up).",
+        "data": {
+          "name": "Name",
+          "retry": "Try again"
+        },
+        "data_description": {
+          "name": "What the device is called in Home Assistant",
+          "retry": "Configure it again now (up to 90 seconds) instead of saving and closing"
+        }
+      },
       "pair_switch": {
         "title": "Pair a wheel / switch",
         "description": "The dimmer stores the pairing and reacts to the wheel directly, without Home Assistant. Pair one wheel to several dimmers by running this once per dimmer.\n\nPaired from Home Assistant (a pairing made in the SG app is not listed):\n{pairings}",
@@ -117,8 +129,9 @@
       }
     },
     "progress": {
-      "adding": "Setting up {name}: provisioning, then configuring. This takes up to two minutes. Keep pressing the device while it runs: the wheel or switch, or the dimmer's button (power or R). A lamp blinks three times when it is in.",
-      "removing": "Resetting {name}. For a battery device, keep pressing or turning it. This takes up to a minute."
+      "adding": "Setting up {name}: provisioning, then configuring. This takes up to two minutes. Keep pressing the device while it runs: the wheel or switch, or the dimmer's button (power or R). A lamp blinks three times when it is in. If a wheel does not answer through one lamp, Home Assistant tries the next.",
+      "removing": "Resetting {name}. For a battery device, keep pressing or turning it. This takes up to a minute.",
+      "configuring": "Setting up {name}: configuring. This takes up to 90 seconds. Keep pressing or turning it while it runs. If it does not answer through one lamp, Home Assistant tries the next."
     },
     "error": {
       "no_devices": "No device waiting to be set up was found. Factory reset the device (SG: the reset procedure in its manual), make sure it is near a Bluetooth proxy, then press Submit to search again.",
@@ -128,7 +141,7 @@
       "backup_written": "The network (keys, nodes and device keys) was written to {path}. Keep a copy somewhere safe: without it every device must be factory reset if this Home Assistant is lost. It can be imported again with Reconfigure.",
       "device_added": "{name} was added as {unicast}.",
       "device_added_switch": "{name} was added as {unicast}. Its button and battery entities appear once it is used. Pair it to a dimmer with the bluetooth_mesh.pair_switch action.",
-      "device_added_unconfigured": "{name} was provisioned as {unicast} but did not answer the configuration ({error}). Its keys are saved. Wake it (press or turn it) and run the bluetooth_mesh.configure_node action for {unicast}.",
+      "device_added_unconfigured": "{name} is in the network as {unicast} but is not set up yet ({error}). Its keys are saved. Finish it from Configure → Add a device → ⚙ Finish setting up, while pressing or turning it.",
       "add_device_failed": "The device could not be added: {error}. It is not part of the network; factory reset it and try again.",
       "not_loaded": "The integration must be running (connected to the mesh) to add a device.",
       "paired": "{switch} now controls {node}. Try it: it works without Home Assistant.",

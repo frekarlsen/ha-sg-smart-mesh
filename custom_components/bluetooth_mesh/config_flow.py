@@ -166,6 +166,8 @@ logger = logging.getLogger(__name__)
 
 # "Device" choice in the add-device form that just searches again.
 RESCAN = "rescan"
+# Prefix of a choice that finishes a node added earlier but never configured.
+FINISH = "finish:"
 
 
 class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
@@ -187,6 +189,7 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
     _add_name = ""
     _add_result: dict | None = None
     _add_error = ""
+    _add_job: tuple[str, int | None] = ("add", None)
     # The node added but not named yet: named with its default name if the
     # dialog is closed at the name step, so it does not stay out of HA.
     _unnamed: dict | None = None
@@ -413,35 +416,47 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
     async def async_step_add_device(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Pick an unprovisioned device HA can see, and add it."""
-        from .provisioning import discovered_unprovisioned
+        """Pick a device to add, or one added earlier that is not set up yet."""
+        from .provisioning import discovered_unprovisioned, unfinished_nodes
 
         if getattr(self.config_entry, "runtime_data", None) is None:
             return self.async_abort(reason="not_loaded")
         errors: dict[str, str] = {}
-        if user_input is not None and user_input.get("device") not in (None, RESCAN):
-            chosen = [b for b in self._beacons if b.address == user_input["device"]]
+        unfinished = unfinished_nodes(self.config_entry)
+        choice = (user_input or {}).get("device")
+        if choice and choice.startswith(FINISH):
+            unicast = int(choice[len(FINISH):], 16)
+            self._add_name = dict(unfinished).get(unicast) or f"{unicast:04x}"
+            self._add_job = ("configure", unicast)
+            return await self.async_step_add_device_run()
+        if choice not in (None, RESCAN):
+            chosen = [b for b in self._beacons if b.address == choice]
             if chosen:
                 self._add_beacon = chosen[0]
                 self._add_name = chosen[0].name or chosen[0].address
+                self._add_job = ("add", None)
                 return await self.async_step_add_device_run()
         self._beacons = discovered_unprovisioned(self.hass)
-        if not self._beacons:
+        if not self._beacons and not unfinished:
             errors["base"] = "no_devices"
             return self.async_show_form(
                 step_id="add_device", data_schema=vol.Schema({}), errors=errors
             )
+        options = [SelectOptionDict(value=RESCAN, label="🔄 Search again")]
+        # Provisioned but never configured (a wheel that slept through it):
+        # its keys are stored, so it is finished rather than reset and re-added.
+        options += [
+            SelectOptionDict(
+                value=f"{FINISH}{unicast:04x}",
+                label=f"⚙ Finish setting up {name or 'device'} ({unicast:04x})",
+            )
+            for unicast, name in unfinished
+        ]
+        options += [SelectOptionDict(value=b.address, label=b.label) for b in self._beacons]
         schema = vol.Schema(
             {
                 vol.Required("device", default=RESCAN): SelectSelector(
-                    SelectSelectorConfig(
-                        options=[SelectOptionDict(value=RESCAN, label="🔄 Search again")]
-                        + [
-                            SelectOptionDict(value=b.address, label=b.label)
-                            for b in self._beacons
-                        ],
-                        mode=SelectSelectorMode.LIST,
-                    )
+                    SelectSelectorConfig(options=options, mode=SelectSelectorMode.LIST)
                 ),
             }
         )
@@ -450,13 +465,20 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
     async def async_step_add_device_run(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Provision + configure in the background, with a progress spinner."""
-        from .provisioning import async_add_device
+        """Provision + configure (or configure again) with a progress spinner."""
+        from .provisioning import async_add_device, async_configure_added
+
+        kind, unicast = self._add_job
 
         async def add_and_show() -> dict:
-            summary = await async_add_device(
-                self.hass, self.config_entry, self._add_beacon
-            )
+            if kind == "configure":
+                summary = await async_configure_added(
+                    self.hass, self.config_entry, unicast
+                )
+            else:
+                summary = await async_add_device(
+                    self.hass, self.config_entry, self._add_beacon
+                )
             # A lamp blinks as soon as it is in, so the name asked next goes
             # to the right one (what the SG app does: blinkForIdentification).
             if summary.get("can_blink"):
@@ -474,7 +496,7 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
         if fresh or not self._add_task.done():
             return self.async_show_progress(
                 step_id="add_device_run",
-                progress_action="adding",
+                progress_action="configuring" if kind == "configure" else "adding",
                 progress_task=self._add_task,
                 description_placeholders={"name": self._add_name},
             )
@@ -492,13 +514,21 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Name the device that just showed itself (or blink it again)."""
-        from .provisioning import async_finish_add
+        from .provisioning import async_finish_add, store_name
 
         result = self._add_result or {}
         unicast = result["unicast"]
         name = result.get("name", "")
         if user_input is not None:
             name = (user_input.get("name") or "").strip() or name
+            if user_input.get("retry"):
+                # Keep the name given, then configure again. Not left for
+                # async_remove meanwhile: a reload would cut the attempt off.
+                store_name(self.hass, self.config_entry, unicast, name)
+                self._unnamed = None
+                self._add_name = name
+                self._add_job = ("configure", unicast)
+                return await self.async_step_add_device_run()
             if user_input.get("blink_again"):
                 await self._blink(unicast)
             else:
@@ -507,17 +537,27 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
                 return self._add_device_done(name)
 
         fields: dict = {vol.Required("name", default=name): TextSelector()}
-        if result.get("can_blink"):
+        if not result.get("configured"):
+            step_id = "add_device_name_unconfigured"
+            fields[vol.Optional("retry", default=True)] = BooleanSelector()
+        elif result.get("can_blink"):
+            step_id = "add_device_name"
             fields[vol.Optional("blink_again", default=False)] = BooleanSelector()
+        else:
+            step_id = "add_device_name_quiet"
         return self.async_show_form(
-            step_id="add_device_name" if result.get("can_blink") else "add_device_name_quiet",
+            step_id=step_id,
             data_schema=vol.Schema(fields),
-            description_placeholders={"unicast": f"0x{unicast:04x}"},
+            description_placeholders={
+                "unicast": f"0x{unicast:04x}",
+                "error": result.get("error", ""),
+            },
         )
 
-    # The same step for a device that cannot blink (a wheel, or one that did
-    # not answer the configuration): its own text, without "the lamp blinked".
+    # The same step for a device that cannot blink (a wheel), and for one that
+    # did not answer the configuration: each with its own text and choices.
     async_step_add_device_name_quiet = async_step_add_device_name
+    async_step_add_device_name_unconfigured = async_step_add_device_name
 
     async def _blink(self, unicast: int) -> None:
         """Blink a new lamp; never fails the adding, which already happened."""

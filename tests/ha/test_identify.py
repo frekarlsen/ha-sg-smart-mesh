@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -27,6 +26,7 @@ from custom_components.bluetooth_mesh.provisioning import (
     _default_name,
     async_finish_add,
     rename_node,
+    unfinished_nodes,
 )
 
 BEACON = UnprovisionedBeacon(
@@ -83,10 +83,19 @@ def _comp(cid: int, pid: int) -> CompositionData:
 
 
 def test_a_new_device_is_called_after_its_product_until_named() -> None:
-    assert _default_name(BEACON, 5) == "SG 0005"
-    assert _default_name(BEACON, 5, _comp(0x0EE8, 0xA2)) == "LEDDim Smart Pill Micro 3.0 0005"
-    unnamed = dataclasses.replace(BEACON, name="")
-    assert _default_name(unnamed, 5, _comp(0x0059, 1)) == "Mesh device 0005"
+    assert _default_name("SG", 5) == "SG 0005"
+    assert _default_name("SG", 5, _comp(0x0EE8, 0xA2)) == "LEDDim Smart Pill Micro 3.0 0005"
+    assert _default_name("", 5, _comp(0x0059, 1)) == "Mesh device 0005"
+
+
+def test_nodes_that_never_answered_are_found_to_finish() -> None:
+    data = {"nodes": [
+        {"unicastAddress": "0011", "name": "Dimmehjul_06", "configComplete": False},
+        {"unicastAddress": "000F", "name": "Dimmehjul_04", "configComplete": True},
+        {"unicastAddress": "0001", "name": "nRF Mesh"},  # from the export
+    ]}
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_CONNECT_JSON: json.dumps(data)})
+    assert unfinished_nodes(entry) == [(0x11, "Dimmehjul_06")]
 
 
 async def test_the_name_given_is_stored_and_the_entry_reloaded(hass) -> None:
@@ -140,3 +149,97 @@ async def test_identify_says_so_when_the_lamp_cannot_be_reached() -> None:
     with pytest.raises(HomeAssistantError) as err:
         await SgIdentifyButton(_Coord(sent=False), _Node()).async_press()
     assert err.value.translation_key == "sg_identify_failed"
+
+
+# --------------------------------- a wheel heard through one proxy node only
+
+
+class _Wheel(FakeController):
+    """Answers only when HA reaches the mesh through ``reachable_via``."""
+
+    def __init__(self, coord_ref: list, reachable_via: str) -> None:
+        super().__init__()
+        self._coord_ref = coord_ref
+        self._via = reachable_via
+        self.composition = CompositionData(
+            page=0, cid=0x0EE8, pid=0xB1, vid=1, crpl=0x40, features=0x0000,
+            elements=(
+                CompositionElement(loc=0, sig_models=(0x0000,), vendor_models=((0x0EE8, 0),)),
+            ),
+        )
+
+    async def get_composition(self, unicast, *, page=0, timeout=5.0):
+        self.calls.append(("get_composition", self._coord_ref[0].proxy_address))
+        if self._coord_ref[0].proxy_address != self._via:
+            return None
+        return self.composition
+
+    async def add_app_key(self, unicast, **kw):
+        return 0
+
+    async def bind_model(self, element, model, *, unicast, **kw):
+        return 0
+
+    async def set_publication(self, element, model, address, *, unicast, **kw):
+        return 0
+
+
+def _two_proxies(found: list):
+    def find(hass, net_key, *, max_age=None, exclude=()):
+        found.append(set(exclude))
+        for address in ("AA:AA:AA:AA:AA:01", "BB:BB:BB:BB:BB:02"):
+            if address not in exclude:
+                return address
+        return None
+
+    return find
+
+
+async def test_a_silent_wheel_is_tried_through_another_proxy_node(hass) -> None:
+    """2026-10-19: wheels answered through one pill and not through the one HA
+    had moved to. Configuration now moves on until one of them gets through."""
+    from custom_components.bluetooth_mesh import coordinator as coordinator_mod
+
+    entry = _make_entry(hass)
+    ref: list = []
+    wheel = _Wheel(ref, reachable_via="BB:BB:BB:BB:BB:02")
+    found: list = []
+    with (
+        _patch_transport(wheel),
+        patch.object(coordinator_mod, "find_proxy_address", _two_proxies(found)),
+        patch.object(coordinator_mod, "CONFIGURE_SECONDS_PER_PROXY", 0.3),
+    ):
+        coord = MeshCoordinator(hass, entry)
+        ref.append(coord)
+        await coord.async_start()
+        report, comp = await coord.async_configure_node_full(0x12, seconds=5)
+        assert comp is wheel.composition
+        assert report["proxy"] == "BB:BB:BB:BB:BB:02"
+        assert report["publication"]["address"] == "0xffff"  # a wheel: to all
+        # Tried through the first node, then the second; avoids nothing after.
+        tried = [via for name, via in wheel.calls if name == "get_composition"]
+        assert tried[0] == "AA:AA:AA:AA:AA:01" and tried[-1] == "BB:BB:BB:BB:BB:02"
+        assert coord._proxy_avoid == set()
+    await coord.async_stop()
+
+
+async def test_with_one_proxy_node_it_keeps_trying_that_one(hass) -> None:
+    from custom_components.bluetooth_mesh import coordinator as coordinator_mod
+
+    entry = _make_entry(hass)
+    ref: list = []
+    wheel = _Wheel(ref, reachable_via="nowhere")
+    with (
+        _patch_transport(wheel, address="AA:AA:AA:AA:AA:01"),
+        patch.object(coordinator_mod, "CONFIGURE_SECONDS_PER_PROXY", 0.2),
+    ):
+        coord = MeshCoordinator(hass, entry)
+        ref.append(coord)
+        await coord.async_start()
+        report, comp = await coord.async_configure_node_full(0x12, seconds=1)
+        assert comp is None
+        assert "no Composition Data reply" in report["error"]
+        assert {via for name, via in wheel.calls if name == "get_composition"} == {
+            "AA:AA:AA:AA:AA:01"
+        }
+    await coord.async_stop()

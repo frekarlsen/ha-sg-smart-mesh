@@ -344,12 +344,12 @@ def _store(hass: HomeAssistant, entry, data: dict) -> None:
     )
 
 
-def _default_name(beacon: UnprovisionedBeacon, unicast: int, comp=None) -> str:
+def _default_name(label: str, unicast: int, comp=None) -> str:
     """What a new device is called until it is named: its product, if known."""
     if comp is not None and comp.cid == SG_COMPANY_ID:
         product = sg_product(comp.pid).name
     else:
-        product = beacon.name or "Mesh device"
+        product = label or "Mesh device"
     return f"{product} {unicast:04x}"
 
 
@@ -360,7 +360,8 @@ async def async_add_device(
 
     Each stage is written to the stored network before the next begins, so a
     device that is provisioned but fails to configure (a sleeping wheel) is
-    not lost: its device key is kept and ``configure_node`` can finish it.
+    not lost: its device key is kept, and :func:`async_configure_added`
+    finishes it later (*Finish setting up* in the add dialog).
 
     The entry is reloaded with the node's composition by
     :func:`async_finish_add`, once the device has a name: the name is asked
@@ -384,20 +385,56 @@ async def async_add_device(
         "provisioned %s as %#06x (%d element(s))",
         beacon.uuid.hex(), result.unicast, result.num_elements,
     )
-    name = _default_name(beacon, result.unicast)
-    data = add_node(data, result, name, network.net_key_index)
+    provisional = _default_name(beacon.name, result.unicast)
+    data = add_node(data, result, provisional, network.net_key_index)
     _store(hass, entry, data)
     await hass.config_entries.async_reload(entry.entry_id)
-
-    coordinator = await _wait_available(hass, entry)
     # Give the node a moment to leave PB-GATT and join as a mesh node.
     await asyncio.sleep(2.0)
-    report, comp = await coordinator.async_configure_node_full(
-        result.unicast, seconds=90
+    return await async_configure_added(
+        hass, entry, result.unicast, provisional=provisional, label=beacon.name
+    )
+
+
+def unfinished_nodes(entry) -> list[tuple[int, str]]:
+    """(unicast, name) of nodes added here that never answered the configuration."""
+    data = json.loads(entry.data[CONF_CONNECT_JSON])
+    found = []
+    for node in data.get("nodes", []):
+        if not isinstance(node, dict) or node.get("configComplete") is not False:
+            continue
+        span = _node_span(node)
+        if span:
+            found.append((span.start, str(node.get("name") or "")))
+    return sorted(found)
+
+
+async def async_configure_added(
+    hass: HomeAssistant,
+    entry,
+    unicast: int,
+    *,
+    provisional: str | None = None,
+    label: str = "",
+) -> dict:
+    """Configure a node that is provisioned and stored, and record what it is.
+
+    Run right after provisioning, and again for a node that did not answer
+    then (a wheel asleep, or out of reach of the proxy node HA was connected
+    through). A name still ``provisional`` becomes the product's; a name the
+    user gave is kept.
+    """
+    coordinator = await _wait_available(hass, entry)
+    report, comp = await coordinator.async_configure_node_full(unicast, seconds=90)
+    data = json.loads(entry.data[CONF_CONNECT_JSON])
+    stored = next(
+        (str(n.get("name") or "") for n in data.get("nodes", [])
+         if isinstance(n, dict) and unicast in _node_span(n)),
+        "",
     )
     summary = {
-        "name": name,
-        "unicast": result.unicast,
+        "name": stored or provisional or _default_name(label, unicast),
+        "unicast": unicast,
         "configured": comp is not None,
         "can_blink": False,
     }
@@ -408,9 +445,10 @@ async def async_add_device(
     app_key_index = coordinator.network.app_key_for_models(
         CONTROLLED_MODEL_IDS
     ).index
-    data = set_node_composition(data, result.unicast, comp, app_key_index)
-    summary["name"] = _default_name(beacon, result.unicast, comp)
-    data = rename_node(data, result.unicast, summary["name"])
+    data = set_node_composition(data, unicast, comp, app_key_index)
+    if not stored or stored == provisional:
+        summary["name"] = _default_name(label, unicast, comp)
+        data = rename_node(data, unicast, summary["name"])
     _store(hass, entry, data)
     switch = is_sg_switch(comp)
     summary["kind"] = "switch" if switch else "device"
@@ -424,11 +462,17 @@ async def async_add_device(
             options={
                 **entry.options,
                 CONF_SG_SWITCHES: sorted(
-                    {*entry.options.get(CONF_SG_SWITCHES, []), result.unicast}
+                    {*entry.options.get(CONF_SG_SWITCHES, []), unicast}
                 ),
             },
         )
     return summary
+
+
+def store_name(hass: HomeAssistant, entry, unicast: int, name: str) -> None:
+    """Keep a name given before the node is finished, without a reload."""
+    data = json.loads(entry.data[CONF_CONNECT_JSON])
+    _store(hass, entry, rename_node(data, unicast, name))
 
 
 def rename_node(data: dict, unicast: int, name: str) -> dict:

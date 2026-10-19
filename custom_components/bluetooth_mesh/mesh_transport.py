@@ -18,6 +18,7 @@ scope (it only ever runs inside Home Assistant).
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 from dataclasses import dataclass
 from time import monotonic
 from typing import TYPE_CHECKING, Callable
@@ -134,6 +135,7 @@ def find_proxy_address(
     net_key: bytes,
     *,
     max_age: float | None = PROXY_ADVERT_MAX_AGE,
+    exclude: Collection[str] = (),
 ) -> str | None:
     """Address of a connectable mesh proxy advertising ``net_key``'s Network ID.
 
@@ -160,11 +162,18 @@ def find_proxy_address(
     bleak attempt nobody can win (ha-bluetooth-mesh#31). ``None`` lifts the
     rule, for a caller that knows why the advert is old (see
     :data:`PROXY_ADVERT_MAX_AGE`).
+
+    ``exclude`` skips nodes by address: the coordinator tries another proxy
+    node when a battery node it is configuring stays silent through one (see
+    ``MeshCoordinator._async_try_other_proxy``).
     """
     network_id = k3(net_key)
     now = monotonic()
+    skip = {address.upper() for address in exclude}
     for info in bluetooth.async_discovered_service_info(hass, connectable=False):
         if not _matches_network_id(info, network_id):
+            continue
+        if info.address.upper() in skip:
             continue
         age = _advert_age(hass, info, now)
         if max_age is not None and age > max_age:

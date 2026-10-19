@@ -62,7 +62,7 @@
       },
       "add_device": {
         "title": "Legg til en enhet",
-        "description": "Enheter HA har hørt som er fabrikktilbakestilt og venter på oppsett, sist hørt først. Flere av samme type? Velg hvilken som helst: en lampe blinker tre ganger så snart den er lagt til, og da gir du den navn – deretter legger du til den neste. En batterienhet (dimmehjul, bryter) melder seg bare kort etter at den er vekket eller tilbakestilt: vekk den, velg «Søk igjen» og trykk Send. Det er oppføringen som ble sett for noen sekunder siden. Mens en enhet legges til, fortsett å trykke på den: hjulet eller bryteren, eller dimmerens knapp (av/på eller R).",
+        "description": "Enheter HA har hørt som er fabrikktilbakestilt og venter på oppsett, sist hørt først. Flere av samme type? Velg hvilken som helst: en lampe blinker tre ganger så snart den er lagt til, og da gir du den navn – deretter legger du til den neste. En batterienhet (dimmehjul, bryter) melder seg bare kort etter at den er vekket eller tilbakestilt: vekk den, velg «Søk igjen» og trykk Send. Det er oppføringen som ble sett for noen sekunder siden. Mens en enhet legges til, fortsett å trykke på den: hjulet eller bryteren, eller dimmerens knapp (av/på eller R). En enhet som ble lagt til, men ikke svarte på konfigureringen, står som ⚙ Finish setting up: velg den mens du trykker eller vrir på den.",
         "data": {
           "device": "Enhet"
         }
@@ -92,6 +92,18 @@
           "name": "Hva enheten skal hete i Home Assistant"
         }
       },
+      "add_device_name_unconfigured": {
+        "title": "Enheten svarte ikke",
+        "description": "{unicast} er i nettverket, men svarte ikke på konfigureringen ({error}). Fortsett å trykke eller vri på den, la **Prøv igjen** stå avkrysset og trykk Send: Home Assistant prøver også å nå den gjennom andre lamper. Eller fjern krysset for å lagre navnet nå og fullføre senere fra *Legg til en enhet* (⚙ Finish setting up).",
+        "data": {
+          "name": "Navn",
+          "retry": "Prøv igjen"
+        },
+        "data_description": {
+          "name": "Hva enheten skal hete i Home Assistant",
+          "retry": "Konfigurer den på nytt nå (opptil 90 sekunder) i stedet for å lagre og lukke"
+        }
+      },
       "pair_switch": {
         "title": "Koble et hjul / en bryter",
         "description": "Dimmeren lagrer koblingen og reagerer direkte på hjulet, uten Home Assistant. Koble ett hjul til flere dimmere ved å kjøre dette én gang per dimmer.\n\nKoblet fra Home Assistant (koblinger gjort i SG-appen vises ikke):\n{pairings}",
@@ -117,8 +129,9 @@
       }
     },
     "progress": {
-      "adding": "Setter opp {name}: provisjonering, deretter konfigurering. Dette tar opptil to minutter. Fortsett å trykke på enheten mens det pågår: hjulet eller bryteren, eller dimmerens knapp (av/på eller R). En lampe blinker tre ganger når den er inne.",
-      "removing": "Tilbakestiller {name}. For en batterienhet: fortsett å trykke eller vri på den. Dette tar opptil ett minutt."
+      "adding": "Setter opp {name}: provisjonering, deretter konfigurering. Dette tar opptil to minutter. Fortsett å trykke på enheten mens det pågår: hjulet eller bryteren, eller dimmerens knapp (av/på eller R). En lampe blinker tre ganger når den er inne. Svarer et hjul ikke gjennom én lampe, prøver Home Assistant den neste.",
+      "removing": "Tilbakestiller {name}. For en batterienhet: fortsett å trykke eller vri på den. Dette tar opptil ett minutt.",
+      "configuring": "Setter opp {name}: konfigurering. Dette tar opptil 90 sekunder. Fortsett å trykke eller vri på den mens det pågår. Svarer den ikke gjennom én lampe, prøver Home Assistant den neste."
     },
     "error": {
       "no_devices": "Fant ingen enhet som venter på oppsett. Fabrikktilbakestill enheten (SG: tilbakestillingen i manualen), sørg for at den er nær en Bluetooth-proxy, og trykk Send for å søke igjen.",
@@ -128,7 +141,7 @@
       "backup_written": "Nettverket (nøkler, noder og enhetsnøkler) ble skrevet til {path}. Ta vare på en kopi et trygt sted: uten den må alle enheter fabrikktilbakestilles hvis denne Home Assistant går tapt. Den kan importeres igjen med Rekonfigurer.",
       "device_added": "{name} ble lagt til som {unicast}.",
       "device_added_switch": "{name} ble lagt til som {unicast}. Knappe- og batterientitetene dukker opp når den tas i bruk. Koble den til en dimmer med handlingen bluetooth_mesh.pair_switch.",
-      "device_added_unconfigured": "{name} ble provisjonert som {unicast}, men svarte ikke på konfigureringen ({error}). Nøklene er lagret. Vekk den (trykk eller vri) og kjør handlingen bluetooth_mesh.configure_node for {unicast}.",
+      "device_added_unconfigured": "{name} er i nettverket som {unicast}, men er ikke satt opp ennå ({error}). Nøklene er lagret. Fullfør den fra Konfigurer → Legg til en enhet → ⚙ Finish setting up, mens du trykker eller vrir på den.",
       "add_device_failed": "Enheten kunne ikke legges til: {error}. Den er ikke en del av nettverket; fabrikktilbakestill den og prøv igjen.",
       "not_loaded": "Integrasjonen må kjøre (være koblet til meshet) for å legge til en enhet.",
       "paired": "{switch} styrer nå {node}. Prøv: det virker uten Home Assistant.",
