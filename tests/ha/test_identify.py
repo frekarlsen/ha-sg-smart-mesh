@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from unittest.mock import AsyncMock, patch
 
@@ -309,3 +310,76 @@ async def test_a_device_lost_after_it_got_the_keys_is_not_untouched(hass) -> Non
             )
     assert not err.value.untouched
     assert "WAIT_COMPLETE" in str(err.value)
+
+
+async def test_a_broken_link_ends_the_wait_at_once_and_leaves_it_untouched(hass) -> None:
+    from contextlib import asynccontextmanager
+
+    from custom_components.bluetooth_mesh import provisioning as prov_mod
+
+    @asynccontextmanager
+    async def link(hass_, beacon, on_pdu, on_error):
+        # The subscribe fails just after the Invite went out.
+        yield lambda pdu: hass_.loop.call_soon(
+            on_error, RuntimeError("GATT Protocol Error: Unlikely Error")
+        )
+
+    with (
+        patch.object(prov_mod, "_prov_link", link),
+        patch.object(prov_mod, "CAPABILITIES_TIMEOUT", 5.0),
+    ):
+        loop = hass.loop
+        started = loop.time()
+        with pytest.raises(prov_mod.ProvisioningFailed) as err:
+            await prov_mod.async_provision(
+                hass, BEACON, net_key=bytes(16), net_key_index=0, iv_index=0,
+                choose_address=lambda n: 0x20,
+            )
+        assert loop.time() - started < 1.0  # not the 5 s timeout
+    assert err.value.untouched
+    assert "the link failed" in str(err.value) and "Unlikely Error" in str(err.value)
+
+
+async def test_adding_tries_once_more_when_the_device_was_left_untouched(hass) -> None:
+    from types import SimpleNamespace
+
+    from custom_components.bluetooth_mesh import provisioning as prov_mod
+
+    data = {"nodes": []}
+    entry = MockConfigEntry(domain=DOMAIN, data={CONF_CONNECT_JSON: json.dumps(data)})
+    entry.add_to_hass(hass)
+    entry.runtime_data = SimpleNamespace(
+        network=SimpleNamespace(net_key=bytes(16), net_key_index=0, iv_index=0),
+        src_addr=0x7FFF,
+    )
+    tries: list = []
+
+    async def provision(*args, **kwargs):
+        tries.append(1)
+        raise prov_mod.ProvisioningFailed("it did not answer", untouched=True)
+
+    with (
+        patch.object(prov_mod, "async_provision", provision),
+        patch.object(prov_mod.asyncio, "sleep", AsyncMock()),
+    ):
+        with pytest.raises(prov_mod.ProvisioningFailed):
+            await prov_mod.async_add_device(hass, entry, BEACON)
+    assert len(tries) == 2  # once more, then it gives up
+
+    tries.clear()
+
+    async def provision_touched(*args, **kwargs):
+        tries.append(1)
+        raise prov_mod.ProvisioningFailed("lost after the keys", untouched=False)
+
+    with patch.object(prov_mod, "async_provision", provision_touched):
+        with pytest.raises(prov_mod.ProvisioningFailed):
+            await prov_mod.async_add_device(hass, entry, BEACON)
+    assert len(tries) == 1  # it may hold our keys now: no blind retry
+
+
+def test_a_weak_signal_is_flagged_in_the_list() -> None:
+    near = dataclasses.replace(BEACON, rssi=-60)
+    far = dataclasses.replace(BEACON, rssi=-85)
+    assert "weak signal" not in near.label
+    assert "weak signal" in far.label and "-85 dBm" in far.label

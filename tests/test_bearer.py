@@ -73,3 +73,22 @@ async def test_a_late_subscribe_that_confirms_leaves_no_failure(short_grace):
 
     assert bearer.failure is None
     await bearer.stop()
+
+
+async def test_a_late_subscribe_error_is_handed_to_whoever_waits(short_grace):
+    """2026-10-19: provisioning a wheel at -85 dBm, the Data Out subscribe
+    failed with GATT 'Unlikely Error' after the grace period, and the Invite
+    waited out its whole timeout for an answer that could no longer come."""
+    error = RuntimeError("GATT Protocol Error: Unlikely Error")
+    client = SlowClient(outcome=error)
+    bearer = GattBearer(client, provisioning=True)
+    told: list = []
+    bearer.on_failure = told.append
+
+    await bearer.start(lambda _t, _p: None)
+    client.release()
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+
+    assert told == [error]
+    await bearer.stop()

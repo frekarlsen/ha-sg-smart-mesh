@@ -131,6 +131,9 @@ class GattBearer:
         # failure by raising (start() has already returned), so the controller
         # polls this the way it polls the pump to decide the link is dead.
         self.failure: BaseException | None = None
+        #: Called with that failure as it is recorded, for a caller waiting on
+        #: an answer it can no longer get.
+        self.on_failure: "Callable[[BaseException], None] | None" = None
 
     @property
     def max_frame(self) -> int:
@@ -202,6 +205,10 @@ class GattBearer:
             "start_notify(%s) failed after proceeding without it; the link "
             "is unusable: %s", self._data_out, exc,
         )
+        if self.on_failure is not None:
+            # A caller waiting for an answer that can no longer come (the
+            # provisioning Invite, on a weak link) stops now, not at its timeout.
+            self.on_failure(exc)
 
     async def stop(self) -> None:
         """Unsubscribe from Data Out; safe to call on a dead connection."""

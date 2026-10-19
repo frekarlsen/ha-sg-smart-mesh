@@ -49,6 +49,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   out it holds none of our keys. On 2026-10-19 a wheel reached at -82 dBm
   took the link but never answered, and was told to reset.
 
+- A provisioning link that breaks (the Data Out subscribe failing late,
+  as it did twice on 2026-10-19 with a wheel at -85 dBm: GATT "Unlikely
+  Error") ends the attempt at once instead of at the timeout, and an attempt
+  that failed before the device got any key is made once more on a fresh
+  link. `GattBearer.on_failure` reports the late failure to whoever waits.
+- The add list flags a device heard below -80 dBm: bring it closer to a
+  Bluetooth proxy first.
+
 ### Not added
 
 - Blinking a device *before* adding it, the standard Bluetooth Mesh way (a

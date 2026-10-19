@@ -55,6 +55,12 @@ PROVISIONING_TIMEOUT = 60.0
 # -82 dBm took the link but its notifications were never confirmed, and the
 # old single 60 s wait ended in "factory reset it", which it did not need.
 CAPABILITIES_TIMEOUT = 15.0
+# A link that failed before the device got any key is tried once more.
+PROVISIONING_ATTEMPTS = 2
+# Below this a provisioning link may come up and still fail: three tries at
+# -82 to -87 dBm all did on 2026-10-19, while the SG app, beside the wheel,
+# added it at once.
+WEAK_SIGNAL_DBM = -80
 
 # Addresses handed to new nodes start here; the integration's own source
 # address lives at the top of the range, far away.
@@ -89,7 +95,10 @@ class UnprovisionedBeacon:
     def label(self) -> str:
         name = self.name or "Unknown device"
         rssi = f"{self.rssi} dBm, " if self.rssi is not None else ""
-        return f"{name} · {self.address} ({rssi}seen {_age_text(self.age)} ago)"
+        label = f"{name} · {self.address} ({rssi}seen {_age_text(self.age)} ago)"
+        if self.rssi is not None and self.rssi < WEAK_SIGNAL_DBM:
+            label += " ⚠ weak signal: bring it closer to a Bluetooth proxy"
+        return label
 
 
 def _age_text(seconds: float) -> str:
@@ -191,6 +200,8 @@ async def _prov_link(hass: HomeAssistant, beacon: UnprovisionedBeacon, on_pdu, o
         raise ProvisioningFailed(f"could not connect: {exc}", untouched=True) from exc
 
     bearer = GattBearer(client, provisioning=True)
+    # A subscribe that fails late leaves a link nothing will ever answer on.
+    bearer.on_failure = on_error
     pump = BearerPump(bearer, MSG_TYPE_PROVISIONING_PDU)
     pump.on_error = on_error
 
@@ -265,6 +276,8 @@ async def async_provision(
             await asyncio.wait_for(answered.wait(), CAPABILITIES_TIMEOUT)
         except TimeoutError:
             raise failed(_no_answer(hass, beacon)) from None
+        if errors and prov.capabilities is None:
+            raise failed(f"{_no_answer(hass, beacon)}; the link failed: {errors[0]}")
         try:
             await asyncio.wait_for(done.wait(), PROVISIONING_TIMEOUT)
         except TimeoutError:
@@ -425,14 +438,24 @@ async def async_add_device(
     data = json.loads(entry.data[CONF_CONNECT_JSON])
     reserved = {coordinator.src_addr, *entry.options.get(CONF_RETIRED_UNICASTS, [])}
 
-    result = await async_provision(
-        hass,
-        beacon,
-        net_key=network.net_key,
-        net_key_index=network.net_key_index,
-        iv_index=network.iv_index,
-        choose_address=lambda count: choose_unicast(data, count, reserved),
-    )
+    for attempt in range(PROVISIONING_ATTEMPTS):
+        try:
+            result = await async_provision(
+                hass,
+                beacon,
+                net_key=network.net_key,
+                net_key_index=network.net_key_index,
+                iv_index=network.iv_index,
+                choose_address=lambda count: choose_unicast(data, count, reserved),
+            )
+            break
+        except ProvisioningFailed as exc:
+            # Untouched: it holds none of our keys, so a fresh link is safe;
+            # habluetooth may also take the other path after a failure.
+            if not exc.untouched or attempt + 1 == PROVISIONING_ATTEMPTS:
+                raise
+            logger.info("provisioning %s: %s; trying once more", beacon.address, exc)
+            await asyncio.sleep(1.0)
     logger.info(
         "provisioned %s as %#06x (%d element(s))",
         beacon.uuid.hex(), result.unicast, result.num_elements,
