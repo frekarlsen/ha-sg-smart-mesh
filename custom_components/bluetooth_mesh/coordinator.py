@@ -50,6 +50,9 @@ from .btmesh.crypto import k3
 from .btmesh.network_model import UNICAST_MAX, UNICAST_MIN, Network
 from .btmesh.sg_smart import (
     OP_SG_STATUS,
+    SG_LEVEL_LAST,
+    SG_LEVEL_MAX,
+    SG_LEVEL_OFF,
     SG_STATUS_GROUP,
     SG_VENDOR_MODEL_ID,
     SgButtonEvent,
@@ -1398,6 +1401,32 @@ class MeshCoordinator:
         return await self._run_connected(
             lambda c: c.sg_get_status(unicast, timeout=STATUS_TIMEOUT)
         )
+
+    async def async_sg_identify(
+        self, unicast: int, *, flashes: int = 3, period: float = 1.6
+    ) -> bool:
+        """Blink an SG output so it can be told apart, then put it back.
+
+        What the SG app does to identify a device (``blinkForIdentification``
+        / ``sendPowerForIdentification``): plain power commands. Off and full
+        on, ``flashes`` times — slow enough that a fade-in of up to 0.5 s
+        still reads as a blink (a longer one dims it rather than switching it) —
+        then the state it had. True if every command
+        left; a node whose state could not be read is left on.
+        """
+        before = await self.async_sg_get_status(unicast)
+        sent = True
+        for _ in range(flashes):
+            sent &= await self.async_sg_set_level(unicast, SG_LEVEL_OFF)
+            await asyncio.sleep(period / 2)
+            sent &= await self.async_sg_set_level(unicast, SG_LEVEL_MAX)
+            await asyncio.sleep(period / 2)
+        if before is None:
+            restore = SG_LEVEL_LAST
+        else:
+            restore = before.level if before.on and before.level else SG_LEVEL_OFF
+        sent &= await self.async_sg_set_level(unicast, restore)
+        return sent
 
 
     # ------------------------------------------------ node configuration

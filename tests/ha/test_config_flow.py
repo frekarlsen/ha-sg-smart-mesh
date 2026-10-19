@@ -671,29 +671,54 @@ async def test_add_device_needs_a_running_integration(hass) -> None:
     assert result["reason"] == "not_loaded"
 
 
-async def test_add_device_lists_beacons_and_runs_to_the_end(hass) -> None:
-    from custom_components.bluetooth_mesh import provisioning as prov_mod
-    from custom_components.bluetooth_mesh.provisioning import UnprovisionedBeacon
-
-    entry = _menu_entry(hass)
-    beacon = UnprovisionedBeacon(
-        address="AA:BB:CC:DD:EE:FF", uuid=bytes(16), name="SG", rssi=-60
-    )
-    added = []
-
-    async def fake_add(hass_, entry_, beacon_, name):
-        added.append((beacon_.address, name))
-        return {"name": name, "unicast": "0x0005", "configured": True, "kind": "device"}
-
-    with (
+def _patch_mesh():
+    return (
         patch.object(coordinator_mod, "find_proxy_address", return_value=None),
         patch.object(coordinator_mod, "discovered_proxies", return_value=[]),
         patch.object(
             coordinator_mod, "async_register_proxy_callback", return_value=lambda: None
         ),
-    ):
+    )
+
+
+def _beacon():
+    from custom_components.bluetooth_mesh.provisioning import UnprovisionedBeacon
+
+    return UnprovisionedBeacon(
+        address="AA:BB:CC:DD:EE:FF", uuid=bytes(16), name="SG", rssi=-60
+    )
+
+
+async def _finish_progress(hass, result):
+    while result["type"] is FlowResultType.SHOW_PROGRESS:
+        await hass.async_block_till_done()
+        result = await hass.config_entries.options.async_configure(result["flow_id"])
+    return result
+
+
+async def test_add_device_lists_beacons_and_runs_to_the_end(hass) -> None:
+    """Pick, add, see it blink, blink it again, then name it."""
+    from unittest.mock import AsyncMock
+
+    from custom_components.bluetooth_mesh import provisioning as prov_mod
+
+    entry = _menu_entry(hass)
+    beacon = _beacon()
+    added, finished = [], []
+
+    async def fake_add(hass_, entry_, beacon_):
+        added.append(beacon_.address)
+        return {"name": "LEDDim Smart Pill Micro 3.0 0005", "unicast": 5,
+                "configured": True, "kind": "device", "can_blink": True}
+
+    async def fake_finish(hass_, entry_, unicast, name):
+        finished.append((unicast, name))
+
+    a, b, c = _patch_mesh()
+    with a, b, c:
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
+        blink = AsyncMock(return_value=True)
 
         with patch.object(prov_mod, "discovered_unprovisioned", return_value=[]):
             result = await _pick(hass, entry, "add_device")
@@ -703,23 +728,154 @@ async def test_add_device_lists_beacons_and_runs_to_the_end(hass) -> None:
         with (
             patch.object(prov_mod, "discovered_unprovisioned", return_value=[beacon]),
             patch.object(prov_mod, "async_add_device", fake_add),
+            patch.object(prov_mod, "async_finish_add", fake_finish),
+            patch.object(entry.runtime_data, "async_sg_identify", blink),
         ):
             result = await hass.config_entries.options.async_configure(
                 result["flow_id"], {}
             )
             assert result["step_id"] == "add_device"
-            result = await hass.config_entries.options.async_configure(
-                result["flow_id"], {"device": beacon.address, "name": "Stue"}
+            assert "name" not in {str(k) for k in result["data_schema"].schema}
+            result = await _finish_progress(
+                hass,
+                await hass.config_entries.options.async_configure(
+                    result["flow_id"], {"device": beacon.address}
+                ),
             )
-            if result["type"] is FlowResultType.SHOW_PROGRESS:
-                await hass.async_block_till_done()
-                result = await hass.config_entries.options.async_configure(
-                    result["flow_id"]
-                )
+            # Added, and the lamp blinked before its name is asked.
+            assert added == [beacon.address]
+            assert blink.await_args_list[0].args == (5,)
+            assert result["step_id"] == "add_device_name"
+            assert result["description_placeholders"] == {"unicast": "0x0005"}
+
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], {"name": "Stue", "blink_again": True}
+            )
+            assert result["step_id"] == "add_device_name"
+            assert blink.await_count == 2
+            assert finished == []  # not named yet
+
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], {"name": "Stue", "blink_again": False}
+            )
         assert result["type"] is FlowResultType.ABORT
         assert result["reason"] == "device_added"
-        assert added == [(beacon.address, "Stue")]
+        assert result["description_placeholders"]["name"] == "Stue"
+        assert finished == [(5, "Stue")]
 
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_blink_first_asks_the_device_before_adding_it(hass) -> None:
+    from custom_components.bluetooth_mesh import provisioning as prov_mod
+
+    entry = _menu_entry(hass)
+    beacon = _beacon()
+    asked, added = [], []
+
+    async def fake_identify(hass_, beacon_):
+        asked.append(beacon_.address)
+        return len(asked) > 1  # the first time it does not answer
+
+    async def fake_add(hass_, entry_, beacon_):
+        added.append(beacon_.address)
+        return {"name": "Hjul 0006", "unicast": 6, "configured": True,
+                "kind": "switch", "can_blink": False}
+
+    async def fake_finish(hass_, entry_, unicast, name):
+        pass
+
+    a, b, c = _patch_mesh()
+    with a, b, c:
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        with (
+            patch.object(prov_mod, "discovered_unprovisioned", return_value=[beacon]),
+            patch.object(prov_mod, "async_identify_unprovisioned", fake_identify),
+            patch.object(prov_mod, "async_add_device", fake_add),
+            patch.object(prov_mod, "async_finish_add", fake_finish),
+        ):
+            result = await _pick(hass, entry, "add_device")
+            pick = {"device": beacon.address, "identify": True}
+
+            # No answer: back to the list, saying so, and nothing added.
+            result = await _finish_progress(
+                hass,
+                await hass.config_entries.options.async_configure(result["flow_id"], pick),
+            )
+            assert result["step_id"] == "add_device"
+            assert result["errors"] == {"base": "identify_no_answer"}
+
+            # It answers: add it from the menu.
+            result = await _finish_progress(
+                hass,
+                await hass.config_entries.options.async_configure(result["flow_id"], pick),
+            )
+            assert result["type"] is FlowResultType.MENU
+            assert result["step_id"] == "add_device_identified"
+            assert added == []
+            result = await _finish_progress(
+                hass,
+                await hass.config_entries.options.async_configure(
+                    result["flow_id"], {"next_step_id": "add_device_run"}
+                ),
+            )
+            assert added == [beacon.address]
+            # A wheel cannot blink: the name step says so and has no blink box.
+            assert result["step_id"] == "add_device_name_quiet"
+            assert "blink_again" not in {str(k) for k in result["data_schema"].schema}
+            result = await hass.config_entries.options.async_configure(
+                result["flow_id"], {"name": "Hjul stue"}
+            )
+        assert result["reason"] == "device_added_switch"
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_closing_the_dialog_before_naming_still_adds_the_device(hass) -> None:
+    """Provisioned and configured, but not yet in HA: closing the dialog at the
+    name step must not leave it out until the next restart."""
+    from unittest.mock import AsyncMock
+
+    from custom_components.bluetooth_mesh import provisioning as prov_mod
+
+    entry = _menu_entry(hass)
+    beacon = _beacon()
+    finished = []
+
+    async def fake_add(hass_, entry_, beacon_):
+        return {"name": "LEDDim Smart 3.0 0007", "unicast": 7,
+                "configured": True, "kind": "device", "can_blink": True}
+
+    async def fake_finish(hass_, entry_, unicast, name):
+        finished.append((unicast, name))
+
+    a, b, c = _patch_mesh()
+    with a, b, c:
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        with (
+            patch.object(prov_mod, "discovered_unprovisioned", return_value=[beacon]),
+            patch.object(prov_mod, "async_add_device", fake_add),
+            patch.object(prov_mod, "async_finish_add", fake_finish),
+            # Even a blink that fails (link lost) must not fail the adding.
+            patch.object(
+                entry.runtime_data, "async_sg_identify",
+                AsyncMock(side_effect=ConnectionError("link lost")),
+            ),
+        ):
+            result = await _pick(hass, entry, "add_device")
+            result = await _finish_progress(
+                hass,
+                await hass.config_entries.options.async_configure(
+                    result["flow_id"], {"device": beacon.address}
+                ),
+            )
+            assert result["step_id"] == "add_device_name"
+            hass.config_entries.options.async_abort(result["flow_id"])
+            await hass.async_block_till_done()
+        assert finished == [(7, "LEDDim Smart 3.0 0007")]
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
 

@@ -62,17 +62,50 @@
       },
       "add_device": {
         "title": "Ajouter un appareil",
-        "description": "Appareils réinitialisés entendus par HA, les plus récents en premier. Un appareil sur pile ne s'annonce que brièvement après réveil ou réinitialisation : réveillez-le, choisissez « Search again » et validez. C'est l'entrée vue il y a quelques secondes. Pendant l'ajout, continuez à actionner l'appareil : la molette ou l'interrupteur, ou le bouton du variateur (power ou R).",
+        "description": "Appareils réinitialisés entendus par HA, les plus récents en premier. Plusieurs du même type ? Cochez **Faire clignoter d'abord** pour faire clignoter l'appareil choisi avant tout ajout (si son micrologiciel le montre). Une lampe clignote aussi trois fois juste après son ajout, et vous la nommez à ce moment-là. Un appareil sur pile ne s'annonce que brièvement après réveil ou réinitialisation : réveillez-le, choisissez « Search again » et validez. C'est l'entrée vue il y a quelques secondes. Pendant l'ajout, continuez à actionner l'appareil : la molette ou l'interrupteur, ou le bouton du variateur (power ou R).",
         "data": {
           "device": "Appareil",
+          "identify": "Faire clignoter d'abord, sans ajouter"
+        },
+        "data_description": {
+          "identify": "L'appareil choisi est invité à clignoter pendant 10 secondes, à la manière standard de Bluetooth Mesh (comme Identify dans nRF Mesh). Rien n'est ajouté. Tous les micrologiciels ne le montrent pas."
+        }
+      },
+      "add_device_identify": {
+        "title": "Demande de clignotement à {name}"
+      },
+      "add_device_identified": {
+        "title": "La bonne lampe a-t-elle clignoté ?",
+        "description": "{name} a répondu et a été invité à clignoter pendant 10 secondes. Si c'est la lampe voulue, ajoutez-la maintenant. Si rien n'a clignoté, son micrologiciel ne le montre pas : ajoutez-la quand même, une lampe clignote juste après son ajout, avant que vous la nommiez.",
+        "menu_options": {
+          "add_device_run": "Ajouter cet appareil",
+          "add_device": "Retour à la liste"
+        }
+      },
+      "add_device_run": {
+        "title": "Ajout de {name}"
+      },
+      "add_device_name": {
+        "title": "Nommer le nouvel appareil",
+        "description": "La lampe qui vient de clignoter trois fois est le nouvel appareil ({unicast}). Donnez-lui le nom qu'il aura dans Home Assistant : ses entités en prennent le nom. Un doute ? Cochez **Clignoter à nouveau**.",
+        "data": {
+          "name": "Nom",
+          "blink_again": "Clignoter à nouveau"
+        },
+        "data_description": {
+          "name": "Nom de l'appareil dans Home Assistant",
+          "blink_again": "Faire clignoter la lampe une fois de plus au lieu d'enregistrer le nom"
+        }
+      },
+      "add_device_name_quiet": {
+        "title": "Nommer le nouvel appareil",
+        "description": "Le nouvel appareil est {unicast}. Donnez-lui le nom qu'il aura dans Home Assistant : ses entités en prennent le nom.",
+        "data": {
           "name": "Nom"
         },
         "data_description": {
           "name": "Nom de l'appareil dans Home Assistant"
         }
-      },
-      "add_device_run": {
-        "title": "Ajout de {name}"
       },
       "pair_switch": {
         "title": "Associer une molette / un interrupteur",
@@ -99,12 +132,14 @@
       }
     },
     "progress": {
-      "adding": "Configuration de {name} : provisionnement puis configuration. Jusqu'à deux minutes. Continuez à actionner l'appareil : la molette ou l'interrupteur, ou le bouton du variateur (power ou R).",
-      "removing": "Réinitialisation de {name}. Pour un appareil sur pile, continuez à l'actionner. Jusqu'à une minute."
+      "adding": "Configuration de {name} : provisionnement puis configuration. Jusqu'à deux minutes. Continuez à actionner l'appareil : la molette ou l'interrupteur, ou le bouton du variateur (power ou R). Une lampe clignote trois fois une fois ajoutée.",
+      "removing": "Réinitialisation de {name}. Pour un appareil sur pile, continuez à l'actionner. Jusqu'à une minute.",
+      "identifying": "Demande à {name} de clignoter pendant 10 secondes. Repérez la lampe qui clignote."
     },
     "error": {
       "no_devices": "Aucun appareil en attente de configuration n'a été trouvé. Réinitialisez l'appareil, placez-le près d'un proxy Bluetooth, puis validez pour relancer la recherche.",
-      "send_failed": "La commande n'a pas pu être envoyée : le mesh est-il connecté ?"
+      "send_failed": "La commande n'a pas pu être envoyée : le mesh est-il connecté ?",
+      "identify_no_answer": "L'appareil n'a pas répondu. Vérifiez qu'il est alimenté et proche d'un proxy Bluetooth, ou choisissez « Search again »."
     },
     "abort": {
       "backup_written": "Le réseau (clés, nœuds et clés d'appareil) a été écrit dans {path}. Conservez-en une copie en lieu sûr : sans elle, tous les appareils devront être réinitialisés si ce Home Assistant est perdu. Elle peut être réimportée avec Reconfigurer.",

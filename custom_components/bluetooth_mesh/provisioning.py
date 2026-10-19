@@ -20,6 +20,7 @@ import asyncio
 import copy
 import json
 import logging
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from time import monotonic
 from typing import Callable
@@ -30,9 +31,12 @@ from homeassistant.core import HomeAssistant
 
 from .btmesh.access import CompositionData
 from .btmesh.bearer import PROV_SERVICE, GattBearer, parse_unprovisioned_service_data
+from .btmesh.prov_pdu import Capabilities, Invite
+from .btmesh.prov_pdu import decode as decode_prov_pdu
 from .btmesh.provisioner import Provisioner
 from .btmesh.proxy_pdu import MSG_TYPE_PROVISIONING_PDU
 from .btmesh.pump import BearerPump
+from .btmesh.sg_smart import SG_COMPANY_ID, sg_product
 from .const import (
     CONF_CONNECT_JSON,
     CONF_RETIRED_UNICASTS,
@@ -131,16 +135,13 @@ class ProvisionResult:
     uuid: bytes
 
 
-async def async_provision(
-    hass: HomeAssistant,
-    beacon: UnprovisionedBeacon,
-    *,
-    net_key: bytes,
-    net_key_index: int,
-    iv_index: int,
-    choose_address: Callable[[int], int],
-) -> ProvisionResult:
-    """PB-GATT provision ``beacon``; ``choose_address(num_elements)`` -> unicast."""
+@asynccontextmanager
+async def _prov_link(hass: HomeAssistant, beacon: UnprovisionedBeacon, on_pdu, on_error):
+    """A PB-GATT link to ``beacon`` through a proxy, closed again on exit.
+
+    ``on_pdu(payload)`` gets each Provisioning PDU; ``on_error(exc)`` a broken
+    link. Yields the send function for Provisioning PDUs.
+    """
     ble_device = bluetooth.async_ble_device_from_address(
         hass, beacon.address, connectable=True
     )
@@ -160,35 +161,59 @@ async def async_provision(
 
     bearer = GattBearer(client, provisioning=True)
     pump = BearerPump(bearer, MSG_TYPE_PROVISIONING_PDU)
+    pump.on_error = on_error
+
+    def on_message(msg_type: int, payload: bytes) -> None:
+        if msg_type == MSG_TYPE_PROVISIONING_PDU:
+            on_pdu(payload)
+
+    try:
+        await bearer.start(on_message)
+        pump.start()
+        yield pump.put
+    finally:
+        await pump.stop()
+        await bearer.stop()
+        try:
+            await client.disconnect()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+async def async_provision(
+    hass: HomeAssistant,
+    beacon: UnprovisionedBeacon,
+    *,
+    net_key: bytes,
+    net_key_index: int,
+    iv_index: int,
+    choose_address: Callable[[int], int],
+) -> ProvisionResult:
+    """PB-GATT provision ``beacon``; ``choose_address(num_elements)`` -> unicast."""
     done = asyncio.Event()
     errors: list[BaseException] = []
+    prov: Provisioner | None = None
 
     def fail(exc: BaseException) -> None:
         errors.append(exc)
         done.set()
 
-    prov = Provisioner(
-        net_key, net_key_index, iv_index, FIRST_NODE_ADDRESS, send=pump.put
-    )
-
-    def on_capabilities(caps) -> None:
-        prov.unicast_addr = choose_address(max(1, caps.num_elements))
-
-    prov.on_capabilities = on_capabilities
-    prov.on_done = done.set
-    pump.on_error = fail
-
-    def on_message(msg_type: int, payload: bytes) -> None:
-        if msg_type != MSG_TYPE_PROVISIONING_PDU:
-            return
+    def on_pdu(payload: bytes) -> None:
         try:
             prov.handle_pdu(payload)
         except BaseException as exc:  # noqa: BLE001 - surface to the waiter
             fail(exc)
 
-    try:
-        await bearer.start(on_message)
-        pump.start()
+    async with _prov_link(hass, beacon, on_pdu, fail) as send:
+        prov = Provisioner(
+            net_key, net_key_index, iv_index, FIRST_NODE_ADDRESS, send=send
+        )
+
+        def on_capabilities(caps) -> None:
+            prov.unicast_addr = choose_address(max(1, caps.num_elements))
+
+        prov.on_capabilities = on_capabilities
+        prov.on_done = done.set
         prov.start()
         try:
             await asyncio.wait_for(done.wait(), PROVISIONING_TIMEOUT)
@@ -198,13 +223,6 @@ async def async_provision(
             ) from None
         if errors:
             raise ProvisioningFailed(f"{errors[0]} (step {prov.state.name})")
-    finally:
-        await pump.stop()
-        await bearer.stop()
-        try:
-            await client.disconnect()
-        except Exception:  # noqa: BLE001
-            pass
 
     if not prov.done or prov.device_key is None or prov.capabilities is None:
         raise ProvisioningFailed(f"ended without completing (step {prov.state.name})")
@@ -214,6 +232,46 @@ async def async_provision(
         num_elements=max(1, prov.capabilities.num_elements),
         uuid=beacon.uuid,
     )
+
+
+# Long enough to look round a room for it; short enough to try the next one.
+IDENTIFY_SECONDS = 10
+# A device in reach answers the Invite at once; give a proxy link a moment.
+IDENTIFY_ANSWER_TIMEOUT = 15.0
+
+
+async def async_identify_unprovisioned(
+    hass: HomeAssistant, beacon: UnprovisionedBeacon, seconds: int = IDENTIFY_SECONDS
+) -> bool:
+    """Ask a device that is not added yet to draw attention to itself.
+
+    The standard way (nRF Mesh's *Identify*): open a provisioning link, send
+    Invite with an attention time, and hold the link that long. Nothing is
+    added; on disconnect the device is unprovisioned as before. True if the
+    device answered (Capabilities) — whether it also blinks is up to its
+    firmware: the SG app sends no attention time and identifies a device after
+    adding it instead, which :func:`async_add_device` does too.
+    """
+    answered = asyncio.Event()
+
+    def on_pdu(payload: bytes) -> None:
+        try:
+            if isinstance(decode_prov_pdu(payload), Capabilities):
+                answered.set()
+        except Exception:  # noqa: BLE001 - only the answer matters here
+            return
+
+    async with _prov_link(hass, beacon, on_pdu, lambda _exc: None) as send:
+        # The Invite alone, not a Provisioner: that would go on to Start and
+        # the key exchange the moment Capabilities came back.
+        send(Invite(attention_duration=seconds).encode())
+        try:
+            await asyncio.wait_for(answered.wait(), IDENTIFY_ANSWER_TIMEOUT)
+        except TimeoutError:
+            return False
+        # Hold the link: a device may end its attention when the link goes.
+        await asyncio.sleep(seconds)
+    return True
 
 
 # --------------------------------------------------------- the stored network
@@ -328,14 +386,28 @@ def _store(hass: HomeAssistant, entry, data: dict) -> None:
     )
 
 
+def _default_name(beacon: UnprovisionedBeacon, unicast: int, comp=None) -> str:
+    """What a new device is called until it is named: its product, if known."""
+    if comp is not None and comp.cid == SG_COMPANY_ID:
+        product = sg_product(comp.pid).name
+    else:
+        product = beacon.name or "Mesh device"
+    return f"{product} {unicast:04x}"
+
+
 async def async_add_device(
-    hass: HomeAssistant, entry, beacon: UnprovisionedBeacon, name: str
+    hass: HomeAssistant, entry, beacon: UnprovisionedBeacon
 ) -> dict:
-    """Provision, store, configure and expose one device. Returns a summary.
+    """Provision, store and configure one device. Returns a summary.
 
     Each stage is written to the stored network before the next begins, so a
     device that is provisioned but fails to configure (a sleeping wheel) is
     not lost: its device key is kept and ``configure_node`` can finish it.
+
+    The entry is reloaded with the node's composition by
+    :func:`async_finish_add`, once the device has a name: the name is asked
+    after the device has shown which one it is (it blinks), and the entities
+    take their ids from it when they are created.
     """
     coordinator = entry.runtime_data
     network = coordinator.network
@@ -354,6 +426,7 @@ async def async_add_device(
         "provisioned %s as %#06x (%d element(s))",
         beacon.uuid.hex(), result.unicast, result.num_elements,
     )
+    name = _default_name(beacon, result.unicast)
     data = add_node(data, result, name, network.net_key_index)
     _store(hass, entry, data)
     await hass.config_entries.async_reload(entry.entry_id)
@@ -366,8 +439,9 @@ async def async_add_device(
     )
     summary = {
         "name": name,
-        "unicast": f"0x{result.unicast:04x}",
+        "unicast": result.unicast,
         "configured": comp is not None,
+        "can_blink": False,
     }
     if comp is None:
         summary["error"] = report.get("error", "no reply")
@@ -377,9 +451,15 @@ async def async_add_device(
         CONTROLLED_MODEL_IDS
     ).index
     data = set_node_composition(data, result.unicast, comp, app_key_index)
+    summary["name"] = _default_name(beacon, result.unicast, comp)
+    data = rename_node(data, result.unicast, summary["name"])
     _store(hass, entry, data)
     switch = is_sg_switch(comp)
     summary["kind"] = "switch" if switch else "device"
+    # An SG output answers SG's power commands at once: it can show itself.
+    summary["can_blink"] = not switch and any(
+        (SG_COMPANY_ID, 0x0000) in element.vendor_models for element in comp.elements
+    )
     if switch:
         hass.config_entries.async_update_entry(
             entry,
@@ -390,8 +470,23 @@ async def async_add_device(
                 ),
             },
         )
-    await hass.config_entries.async_reload(entry.entry_id)
     return summary
+
+
+def rename_node(data: dict, unicast: int, name: str) -> dict:
+    """A copy of ``data`` with the node at ``unicast`` called ``name``."""
+    out = copy.deepcopy(data)
+    for node in out.get("nodes", []):
+        if isinstance(node, dict) and unicast in _node_span(node):
+            node["name"] = name
+    return out
+
+
+async def async_finish_add(hass: HomeAssistant, entry, unicast: int, name: str) -> None:
+    """Name the node added by :func:`async_add_device`, and bring it into HA."""
+    data = json.loads(entry.data[CONF_CONNECT_JSON])
+    _store(hass, entry, rename_node(data, unicast, name))
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 # ------------------------------------------------------------------- remove

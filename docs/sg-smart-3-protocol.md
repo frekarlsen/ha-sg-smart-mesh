@@ -114,6 +114,19 @@ Verified: press toggles, turning dims both ways, hold does nothing —
 E0 E8 0E  13 0A 0A 00 03 00 04 04  0A FF  FF FF  0B FF  0B FF
 ```
 
+## Identifying a new device
+
+The SG app does not use the provisioning Invite's attention time: its Telink
+SDK sends `Invite(0)` (`ProvisioningController`, `new ProvisioningInvitePDU((byte) 0)`).
+It identifies a device with plain power commands instead
+(`blinkForIdentification`, `sendPowerForIdentification`). The integration does
+the same right after adding a lamp: off and full on three times, then back to
+the state read before.
+
+*Blink first* in the add dialog sends `Invite` with a 10 s attention time and
+stops at the device's Capabilities (nothing is provisioned). Whether an SG
+device shows the attention is not known yet.
+
 ## Button events — kind `0x2A`
 
 Published by a wheel or switch (opcode `0xF0`, to `0xFFFF`):

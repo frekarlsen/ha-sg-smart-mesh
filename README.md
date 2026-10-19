@@ -55,12 +55,18 @@ devices from Home Assistant alone.
 ### The Configure menu
 
 - **Add a device** — lists factory-reset devices Home Assistant can hear, most
-  recently heard first. Pick one, name it, and keep pressing the device while
-  it is set up (the wheel, or the dimmer's power / R button). HA provisions it,
-  gives it the application key, binds its models and points its publication
-  where it belongs: a dimmer reports to HA, a wheel publishes to all nodes so
-  paired dimmers can act on it. A battery device only announces itself for a
-  moment after it is woken — wake it, then choose *Search again*.
+  recently heard first. Pick one and keep pressing the device while it is set
+  up (the wheel, or the dimmer's power / R button). HA provisions it, gives it
+  the application key, binds its models and points its publication where it
+  belongs: a dimmer reports to HA, a wheel publishes to all nodes so paired
+  dimmers can act on it. A battery device only announces itself for a moment
+  after it is woken — wake it, then choose *Search again*.
+
+  Several identical devices waiting? A lamp **blinks three times** as soon as
+  it is added, and is named only then, so the name goes to the lamp you saw
+  (*Blink again* repeats it). *Blink first* asks the chosen device to blink
+  before anything is added, the standard Bluetooth Mesh way; whether it shows
+  that depends on its firmware.
 - **Pair a wheel / switch to a dimmer** — pick both by name and what a short
   press, a turn and a hold should do. The dimmer stores the pairing. One wheel
   can drive several dimmers: pair it with each. The dialog lists what is

@@ -62,17 +62,50 @@
       },
       "add_device": {
         "title": "Add a device",
-        "description": "Devices HA has heard that are factory reset and waiting to be set up, most recently heard first. A battery device (dimmer wheel, switch) only announces itself briefly after it is woken or reset: wake it, then choose \"Search again\" and Submit. It is the entry seen a few seconds ago. While a device is being added, keep pressing it: the wheel or switch, or the dimmer's button (power or R).",
+        "description": "Devices HA has heard that are factory reset and waiting to be set up, most recently heard first. Several of the same kind? Tick **Blink first** to make the chosen one blink before anything is added (if its firmware shows it). A lamp also blinks three times right after it is added, and you name it then. A battery device (dimmer wheel, switch) only announces itself briefly after it is woken or reset: wake it, then choose \"Search again\" and Submit. It is the entry seen a few seconds ago. While a device is being added, keep pressing it: the wheel or switch, or the dimmer's button (power or R).",
         "data": {
           "device": "Device",
+          "identify": "Blink first, don't add yet"
+        },
+        "data_description": {
+          "identify": "The chosen device is asked to blink for 10 seconds, the standard Bluetooth Mesh way (as Identify in nRF Mesh). Nothing is added. Not every firmware shows it."
+        }
+      },
+      "add_device_identify": {
+        "title": "Asking {name} to blink"
+      },
+      "add_device_identified": {
+        "title": "Did the right lamp blink?",
+        "description": "{name} answered and was asked to blink for 10 seconds. If that is the lamp you want, add it now. If nothing blinked, its firmware does not show it: add it anyway, as a lamp blinks right after it is added, before you name it.",
+        "menu_options": {
+          "add_device_run": "Add this device",
+          "add_device": "Back to the list"
+        }
+      },
+      "add_device_run": {
+        "title": "Adding {name}"
+      },
+      "add_device_name": {
+        "title": "Name the new device",
+        "description": "The lamp that just blinked three times is the new device ({unicast}). Give it the name it should have in Home Assistant: its entities are named after it. Not sure which one it was? Tick **Blink again**.",
+        "data": {
+          "name": "Name",
+          "blink_again": "Blink again"
+        },
+        "data_description": {
+          "name": "What the device is called in Home Assistant",
+          "blink_again": "Blink the lamp once more instead of saving the name"
+        }
+      },
+      "add_device_name_quiet": {
+        "title": "Name the new device",
+        "description": "The new device is {unicast}. Give it the name it should have in Home Assistant: its entities are named after it.",
+        "data": {
           "name": "Name"
         },
         "data_description": {
           "name": "What the device is called in Home Assistant"
         }
-      },
-      "add_device_run": {
-        "title": "Adding {name}"
       },
       "pair_switch": {
         "title": "Pair a wheel / switch",
@@ -99,12 +132,14 @@
       }
     },
     "progress": {
-      "adding": "Setting up {name}: provisioning, then configuring. This takes up to two minutes. Keep pressing the device while it runs: the wheel or switch, or the dimmer's button (power or R).",
-      "removing": "Resetting {name}. For a battery device, keep pressing or turning it. This takes up to a minute."
+      "adding": "Setting up {name}: provisioning, then configuring. This takes up to two minutes. Keep pressing the device while it runs: the wheel or switch, or the dimmer's button (power or R). A lamp blinks three times when it is in.",
+      "removing": "Resetting {name}. For a battery device, keep pressing or turning it. This takes up to a minute.",
+      "identifying": "Asking {name} to blink for 10 seconds. Look for the lamp that blinks."
     },
     "error": {
       "no_devices": "No device waiting to be set up was found. Factory reset the device (SG: the reset procedure in its manual), make sure it is near a Bluetooth proxy, then press Submit to search again.",
-      "send_failed": "The command could not be sent: is the mesh connected?"
+      "send_failed": "The command could not be sent: is the mesh connected?",
+      "identify_no_answer": "The device did not answer. Make sure it is powered and near a Bluetooth proxy, or choose \"Search again\"."
     },
     "abort": {
       "backup_written": "The network (keys, nodes and device keys) was written to {path}. Keep a copy somewhere safe: without it every device must be factory reset if this Home Assistant is lost. It can be imported again with Reconfigure.",
