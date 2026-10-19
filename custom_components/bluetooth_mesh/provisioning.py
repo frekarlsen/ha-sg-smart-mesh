@@ -50,6 +50,11 @@ from .coordinator import is_sg_switch
 logger = logging.getLogger(__name__)
 
 PROVISIONING_TIMEOUT = 60.0
+# A device that hears the Invite answers it at once. Silence this long means it
+# never got it, or its answer never came back: on 2026-10-19 a wheel reached at
+# -82 dBm took the link but its notifications were never confirmed, and the
+# old single 60 s wait ended in "factory reset it", which it did not need.
+CAPABILITIES_TIMEOUT = 15.0
 
 # Addresses handed to new nodes start here; the integration's own source
 # address lives at the top of the range, far away.
@@ -58,7 +63,15 @@ LAST_NODE_ADDRESS = 0x6FFF
 
 
 class ProvisioningFailed(Exception):
-    """Provisioning did not complete; the message says why."""
+    """Provisioning did not complete; the message says why.
+
+    ``untouched``: it failed before the device was given any key, so it is
+    still factory new and can simply be tried again — no reset.
+    """
+
+    def __init__(self, message: str, *, untouched: bool = False) -> None:
+        super().__init__(message)
+        self.untouched = untouched
 
 
 # ------------------------------------------------------------------ discovery
@@ -133,6 +146,25 @@ class ProvisionResult:
     uuid: bytes
 
 
+_PROVISIONING_DATA = bytes([0x07])  # the PDU that hands the device our keys
+
+
+def _no_answer(hass: HomeAssistant, beacon: UnprovisionedBeacon) -> str:
+    """Why a device did not answer the Invite, with the signal it was heard at."""
+    from .mesh_transport import connect_paths
+
+    paths = [p for p in connect_paths(hass, beacon.address) if p.rssi is not None]
+    if paths:
+        best = paths[0]
+        return (
+            f"it did not answer the invitation (signal {best.rssi} dBm "
+            f"through {best.name})"
+        )
+    if beacon.rssi is not None:
+        return f"it did not answer the invitation (signal {beacon.rssi} dBm)"
+    return "it did not answer the invitation"
+
+
 @asynccontextmanager
 async def _prov_link(hass: HomeAssistant, beacon: UnprovisionedBeacon, on_pdu, on_error):
     """A PB-GATT link to ``beacon`` through a proxy, closed again on exit.
@@ -145,7 +177,8 @@ async def _prov_link(hass: HomeAssistant, beacon: UnprovisionedBeacon, on_pdu, o
     )
     if ble_device is None:
         raise ProvisioningFailed(
-            "the device is no longer reachable through a Bluetooth proxy"
+            "the device is no longer reachable through a Bluetooth proxy",
+            untouched=True,
         )
     try:
         client = await establish_connection(
@@ -155,7 +188,7 @@ async def _prov_link(hass: HomeAssistant, beacon: UnprovisionedBeacon, on_pdu, o
             max_attempts=3,
         )
     except Exception as exc:  # noqa: BLE001 - bleak raises many kinds
-        raise ProvisioningFailed(f"could not connect: {exc}") from exc
+        raise ProvisioningFailed(f"could not connect: {exc}", untouched=True) from exc
 
     bearer = GattBearer(client, provisioning=True)
     pump = BearerPump(bearer, MSG_TYPE_PROVISIONING_PDU)
@@ -189,12 +222,15 @@ async def async_provision(
 ) -> ProvisionResult:
     """PB-GATT provision ``beacon``; ``choose_address(num_elements)`` -> unicast."""
     done = asyncio.Event()
+    answered = asyncio.Event()
     errors: list[BaseException] = []
+    keys_sent = False
     prov: Provisioner | None = None
 
     def fail(exc: BaseException) -> None:
         errors.append(exc)
         done.set()
+        answered.set()
 
     def on_pdu(payload: bytes) -> None:
         try:
@@ -202,25 +238,41 @@ async def async_provision(
         except BaseException as exc:  # noqa: BLE001 - surface to the waiter
             fail(exc)
 
+    def failed(message: str) -> ProvisioningFailed:
+        # Until the Provisioning Data PDU has gone out, the device holds none
+        # of our keys: it is as new as before and can be tried again at once.
+        return ProvisioningFailed(message, untouched=not keys_sent)
+
     async with _prov_link(hass, beacon, on_pdu, fail) as send:
+
+        def send_tracked(pdu: bytes) -> None:
+            nonlocal keys_sent
+            keys_sent |= pdu[:1] == _PROVISIONING_DATA
+            send(pdu)
+
         prov = Provisioner(
-            net_key, net_key_index, iv_index, FIRST_NODE_ADDRESS, send=send
+            net_key, net_key_index, iv_index, FIRST_NODE_ADDRESS, send=send_tracked
         )
 
         def on_capabilities(caps) -> None:
+            answered.set()
             prov.unicast_addr = choose_address(max(1, caps.num_elements))
 
         prov.on_capabilities = on_capabilities
         prov.on_done = done.set
         prov.start()
         try:
+            await asyncio.wait_for(answered.wait(), CAPABILITIES_TIMEOUT)
+        except TimeoutError:
+            raise failed(_no_answer(hass, beacon)) from None
+        try:
             await asyncio.wait_for(done.wait(), PROVISIONING_TIMEOUT)
         except TimeoutError:
-            raise ProvisioningFailed(
+            raise failed(
                 f"the device stopped answering (step {prov.state.name})"
             ) from None
         if errors:
-            raise ProvisioningFailed(f"{errors[0]} (step {prov.state.name})")
+            raise failed(f"{errors[0]} (step {prov.state.name})")
 
     if not prov.done or prov.device_key is None or prov.capabilities is None:
         raise ProvisioningFailed(f"ended without completing (step {prov.state.name})")

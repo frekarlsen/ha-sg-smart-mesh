@@ -143,6 +143,7 @@
       "device_added_switch": "{name} was added as {unicast}. Its button and battery entities appear once it is used. Pair it to a dimmer with the bluetooth_mesh.pair_switch action.",
       "device_added_unconfigured": "{name} is in the network as {unicast} but is not set up yet ({error}). Its keys are saved. Finish it from Configure → Add a device → ⚙ Finish setting up, while pressing or turning it.",
       "add_device_failed": "The device could not be added: {error}. It is not part of the network; factory reset it and try again.",
+      "add_device_failed_untouched": "The device did not answer: {error}. Nothing was changed on it, so it needs no reset. Hold it within a metre or two of a Bluetooth proxy (or of the Home Assistant machine), keep pressing it, and add it again.",
       "not_loaded": "The integration must be running (connected to the mesh) to add a device.",
       "paired": "{switch} now controls {node}. Try it: it works without Home Assistant.",
       "unpaired": "{switch} no longer controls {node}.",

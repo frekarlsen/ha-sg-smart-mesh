@@ -143,6 +143,7 @@
       "device_added_switch": "{name} a été ajouté à l'adresse {unicast}. Ses entités bouton et pile apparaissent dès sa première utilisation. Associez-le à un variateur avec l'action bluetooth_mesh.pair_switch.",
       "device_added_unconfigured": "{name} fait partie du réseau à l'adresse {unicast} mais n'est pas encore configuré ({error}). Ses clés sont enregistrées. Terminez-le depuis Configurer → Ajouter un appareil → ⚙ Finish setting up, en l'actionnant.",
       "add_device_failed": "L'appareil n'a pas pu être ajouté : {error}. Il ne fait pas partie du réseau ; réinitialisez-le et réessayez.",
+      "add_device_failed_untouched": "L'appareil n'a pas répondu : {error}. Rien n'a été modifié, il n'a donc pas besoin d'être réinitialisé. Placez-le à un ou deux mètres d'un proxy Bluetooth (ou de la machine Home Assistant), continuez à l'actionner et ajoutez-le à nouveau.",
       "not_loaded": "L'intégration doit être en marche (connectée au mesh) pour ajouter un appareil.",
       "paired": "{switch} commande maintenant {node}. Essayez : cela fonctionne sans Home Assistant.",
       "unpaired": "{switch} ne commande plus {node}.",

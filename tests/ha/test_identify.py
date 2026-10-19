@@ -243,3 +243,69 @@ async def test_with_one_proxy_node_it_keeps_trying_that_one(hass) -> None:
             "AA:AA:AA:AA:AA:01"
         }
     await coord.async_stop()
+
+
+# ------------------------------------------------- a device that does not answer
+
+
+def _link(on_send):
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def link(hass, beacon, on_pdu, on_error):
+        yield lambda pdu: on_send(hass, pdu, on_pdu)
+
+    return link
+
+
+async def test_no_answer_to_the_invite_fails_fast_and_needs_no_reset(hass) -> None:
+    from custom_components.bluetooth_mesh import provisioning as prov_mod
+
+    with (
+        patch.object(prov_mod, "_prov_link", _link(lambda *a: None)),
+        patch.object(prov_mod, "CAPABILITIES_TIMEOUT", 0.05),
+    ):
+        with pytest.raises(prov_mod.ProvisioningFailed) as err:
+            await prov_mod.async_provision(
+                hass, BEACON, net_key=bytes(16), net_key_index=0, iv_index=0,
+                choose_address=lambda n: 0x20,
+            )
+    assert err.value.untouched
+    assert "did not answer the invitation" in str(err.value)
+    assert "-50 dBm" in str(err.value)  # the signal it was listed with
+
+
+async def test_a_device_lost_after_it_got_the_keys_is_not_untouched(hass) -> None:
+    """Silence after the Data PDU: it may hold our keys now, so a reset is due."""
+    from types import SimpleNamespace
+
+    from custom_components.bluetooth_mesh import provisioning as prov_mod
+
+    class KeysThenSilence:
+        """Answers the Invite, is sent the keys, then never says Complete."""
+
+        def __init__(self, *args, send):
+            self._send = send
+            self.state = SimpleNamespace(name="WAIT_COMPLETE")
+            self.on_capabilities = self.on_done = None
+
+        def start(self):
+            self._send(bytes([0x00, 0x00]))
+            self.on_capabilities(SimpleNamespace(num_elements=1))
+            self._send(bytes([0x07]) + bytes(33))  # Provisioning Data
+
+        def handle_pdu(self, data):
+            pass
+
+    with (
+        patch.object(prov_mod, "_prov_link", _link(lambda *a: None)),
+        patch.object(prov_mod, "Provisioner", KeysThenSilence),
+        patch.object(prov_mod, "PROVISIONING_TIMEOUT", 0.05),
+    ):
+        with pytest.raises(prov_mod.ProvisioningFailed) as err:
+            await prov_mod.async_provision(
+                hass, BEACON, net_key=bytes(16), net_key_index=0, iv_index=0,
+                choose_address=lambda n: 0x20,
+            )
+    assert not err.value.untouched
+    assert "WAIT_COMPLETE" in str(err.value)

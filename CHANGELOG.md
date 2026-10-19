@@ -43,6 +43,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   entities took their ids from the placeholder name
   (`event.mesh_device_000f_knapp` for Dimmehjul_04, 2026-10-19).
 
+- A device that does not answer the provisioning Invite fails after 15 s
+  instead of 60, says the signal it was reached at, and is no longer sent to
+  a factory reset it does not need: until the Provisioning Data PDU has gone
+  out it holds none of our keys. On 2026-10-19 a wheel reached at -82 dBm
+  took the link but never answered, and was told to reset.
+
 ### Not added
 
 - Blinking a device *before* adding it, the standard Bluetooth Mesh way (a

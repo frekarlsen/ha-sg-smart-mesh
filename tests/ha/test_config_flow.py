@@ -1053,3 +1053,35 @@ async def test_a_node_left_unconfigured_is_listed_to_finish(hass) -> None:
             assert result["step_id"] == "add_device_name_quiet"
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
+
+
+async def test_a_device_that_never_answered_is_not_sent_to_a_reset(hass) -> None:
+    from custom_components.bluetooth_mesh import provisioning as prov_mod
+
+    entry = _menu_entry(hass)
+    beacon = _beacon()
+
+    async def fake_add(hass_, entry_, beacon_):
+        raise prov_mod.ProvisioningFailed(
+            "it did not answer the invitation (signal -82 dBm)", untouched=True
+        )
+
+    a, b, c = _patch_mesh()
+    with a, b, c:
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        with (
+            patch.object(prov_mod, "discovered_unprovisioned", return_value=[beacon]),
+            patch.object(prov_mod, "async_add_device", fake_add),
+        ):
+            result = await _pick(hass, entry, "add_device")
+            result = await _finish_progress(
+                hass,
+                await hass.config_entries.options.async_configure(
+                    result["flow_id"], {"device": beacon.address}
+                ),
+            )
+        assert result["reason"] == "add_device_failed_untouched"
+        assert "-82 dBm" in result["description_placeholders"]["error"]
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()

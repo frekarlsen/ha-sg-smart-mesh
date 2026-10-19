@@ -143,6 +143,7 @@
       "device_added_switch": "{name} ble lagt til som {unicast}. Knappe- og batterientitetene dukker opp når den tas i bruk. Koble den til en dimmer med handlingen bluetooth_mesh.pair_switch.",
       "device_added_unconfigured": "{name} er i nettverket som {unicast}, men er ikke satt opp ennå ({error}). Nøklene er lagret. Fullfør den fra Konfigurer → Legg til en enhet → ⚙ Finish setting up, mens du trykker eller vrir på den.",
       "add_device_failed": "Enheten kunne ikke legges til: {error}. Den er ikke en del av nettverket; fabrikktilbakestill den og prøv igjen.",
+      "add_device_failed_untouched": "Enheten svarte ikke: {error}. Ingenting ble endret på den, så den trenger ingen tilbakestilling. Hold den innen en meter eller to fra en Bluetooth-proxy (eller Home Assistant-maskinen), fortsett å trykke på den, og legg den til på nytt.",
       "not_loaded": "Integrasjonen må kjøre (være koblet til meshet) for å legge til en enhet.",
       "paired": "{switch} styrer nå {node}. Prøv: det virker uten Home Assistant.",
       "unpaired": "{switch} styrer ikke lenger {node}.",

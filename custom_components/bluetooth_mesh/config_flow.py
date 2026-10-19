@@ -189,6 +189,7 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
     _add_name = ""
     _add_result: dict | None = None
     _add_error = ""
+    _add_untouched = False
     _add_job: tuple[str, int | None] = ("add", None)
     # The node added but not named yet: named with its default name if the
     # dialog is closed at the name step, so it does not stay out of HA.
@@ -504,6 +505,7 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
             self._add_result = self._add_task.result()
         except Exception as exc:  # noqa: BLE001 - shown to the user
             self._add_error = str(exc) or type(exc).__name__
+            self._add_untouched = bool(getattr(exc, "untouched", False))
             self._add_task = None
             return self.async_show_progress_done(next_step_id="add_device_failed")
         self._add_task = None
@@ -602,7 +604,9 @@ class BluetoothMeshOptionsFlow(OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         return self.async_abort(
-            reason="add_device_failed",
+            # Failed before it was given a key: still factory new, no reset.
+            reason="add_device_failed_untouched" if self._add_untouched
+            else "add_device_failed",
             description_placeholders={"error": self._add_error},
         )
 
