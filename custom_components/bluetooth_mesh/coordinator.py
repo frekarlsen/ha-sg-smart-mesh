@@ -360,6 +360,10 @@ class MeshCoordinator:
         # Proxy nodes to pass over while configuring a node that did not
         # answer through them (see _async_try_other_proxy).
         self._proxy_avoid: set[str] = set()
+        # Nodes being added in the options flow: not given entities until
+        # they are named (see _handle_sg_button_event). The reload that names
+        # one builds a new coordinator, which starts with none.
+        self._being_added: set[int] = set()
 
     # ------------------------------------------------ derived from the export
 
@@ -1200,6 +1204,12 @@ class MeshCoordinator:
             return
         self._sg_last_event[src] = (event.tid, event.seq, now)
         logger.debug("SG button event from %#06x: %s", src, event)
+        if src in self._being_added:
+            # Pressed to keep it awake while it is set up. Its entities come
+            # with the reload that names it; made now, they would take their
+            # ids from the placeholder name (event.mesh_device_000f_knapp, for
+            # Dimmehjul_04 on 2026-10-19).
+            return
         if src not in self.sg_switches:
             # First event from this switch: remember it (options survive a
             # restart; no reload is triggered by writing them) and let the
@@ -1217,6 +1227,11 @@ class MeshCoordinator:
             return
         for listener in list(self._sg_button_listeners.get(src, ())):
             listener(event)
+
+    @callback
+    def async_hold_new_device(self, unicast: int) -> None:
+        """Give ``unicast`` no entities yet: it is being added and named."""
+        self._being_added.add(unicast)
 
     async def async_sg_pair_switch(
         self, node: int, switch: int, button: int, *,

@@ -425,6 +425,7 @@ async def async_configure_added(
     user gave is kept.
     """
     coordinator = await _wait_available(hass, entry)
+    coordinator.async_hold_new_device(unicast)
     report, comp = await coordinator.async_configure_node_full(unicast, seconds=90)
     data = json.loads(entry.data[CONF_CONNECT_JSON])
     stored = next(

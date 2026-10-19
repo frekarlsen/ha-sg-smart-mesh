@@ -2211,3 +2211,27 @@ async def test_first_sg_button_event_registers_the_switch_then_dedups(hass) -> N
         )
     assert [(e.action, e.value) for e in seen] == [(5, 8), (5, 9)]
     assert len(announced) == 1
+
+
+async def test_a_wheel_being_added_gets_no_entities_before_its_name(hass) -> None:
+    """Pressed to keep it awake during setup, it must not be registered then:
+    its entities would take their ids from the placeholder name."""
+    from homeassistant.helpers.dispatcher import async_dispatcher_connect
+
+    from custom_components.bluetooth_mesh.btmesh.sg_smart import parse_sg_button_event
+    from custom_components.bluetooth_mesh.coordinator import SIGNAL_NEW_SG_SWITCH
+
+    entry = _make_entry(hass)
+    coord = MeshCoordinator(hass, entry)
+    announced: list = []
+    async_dispatcher_connect(
+        hass,
+        SIGNAL_NEW_SG_SWITCH.format(entry.entry_id),
+        lambda unicast, event: announced.append(unicast),
+    )
+    coord.async_hold_new_device(0x000F)
+    press = parse_sg_button_event(bytes.fromhex("2a0a0100041d04010100000000"))
+    coord._handle_sg_button_event(0x000F, press)
+    await hass.async_block_till_done()
+    assert announced == []
+    assert coord.sg_switches == []

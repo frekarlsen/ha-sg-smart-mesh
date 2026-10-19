@@ -36,6 +36,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   moment after each press only, and a relayed message comes too late. Which
   pill HA enters the mesh through is still the first one the scan lists.
 
+### Fixed
+
+- A wheel pressed to keep it awake while it is added no longer gets its
+  entities before it is named: it announced itself mid-setup, and its
+  entities took their ids from the placeholder name
+  (`event.mesh_device_000f_knapp` for Dimmehjul_04, 2026-10-19).
+
 ### Not added
 
 - Blinking a device *before* adding it, the standard Bluetooth Mesh way (a
