@@ -1,415 +1,364 @@
-# SG Smart 3.0 for Home Assistant — Bluetooth Mesh, no gateway
+# SG Smart 3.0 for Home Assistant – Bluetooth Mesh uten gateway
 
 [![Release](https://img.shields.io/github/v/release/frekarlsen/ha-sg-smart-mesh)](https://github.com/frekarlsen/ha-sg-smart-mesh/releases)
 [![Tests](https://github.com/frekarlsen/ha-sg-smart-mesh/actions/workflows/tests.yml/badge.svg)](https://github.com/frekarlsen/ha-sg-smart-mesh/actions/workflows/tests.yml)
 [![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 [![License](https://img.shields.io/github/license/frekarlsen/ha-sg-smart-mesh)](LICENSE)
 
-Run **SG Armaturen "SG Smart 3.0"** lighting — LEDDim Smart Pill 3.0 dimmers,
-SG Smart Wireless 3.0 dimmer wheels — straight from Home Assistant, over the
-Bluetooth you already have. No SG gateway, no SG app, no nRF Mesh.
+Styr **SG Armaturen «SG Smart 3.0»**-belysning, som LEDDim Smart Pill 3.0-dimmere og SG Smart Wireless
+3.0-dimmehjul, direkte fra Home Assistant over Bluetooth du allerede har. Du trenger verken SG-gateway,
+SG-appen eller nRF Mesh.
 
-This is a fork of [dasimon135/ha-bluetooth-mesh](https://github.com/dasimon135/ha-bluetooth-mesh),
-the pure-Python Bluetooth SIG Mesh stack and Home Assistant integration built
-for Häfele Connect Mesh. Everything it does still works; this fork adds SG
-Smart 3.0's vendor protocol and everything needed to set up and manage the
-devices from Home Assistant alone.
+Dette er en fork av [dasimon135/ha-bluetooth-mesh](https://github.com/dasimon135/ha-bluetooth-mesh), en
+Bluetooth SIG Mesh-stakk i ren Python med en Home Assistant-integrasjon, opprinnelig laget for Häfele
+Connect Mesh. Alt den gjør, virker fortsatt. Forken legger til SG Smart 3.0 sin egen protokoll og alt
+som trengs for å sette opp og styre enhetene fra Home Assistant alene.
 
-> **Unofficial.** Not affiliated with or endorsed by SG Armaturen AS. The SG
-> vendor protocol was worked out for interoperability; no SG code is included.
+> **Uoffisiell.** Ikke tilknyttet eller godkjent av SG Armaturen AS. SG-protokollen er kartlagt for å
+> få enhetene til å virke sammen med Home Assistant. Ingen SG-kode er med.
 
-## SG Smart 3.0: what you get
+Har du førstegenerasjons SG Smart (CSRmesh)? Den bruker en annen radioprotokoll. Se søsterprosjektet
+[ha-sg-csrmesh](https://github.com/frekarlsen/ha-sg-csrmesh).
+
+## SG Smart 3.0: dette får du
 
 | | |
 | --- | --- |
-| **Dimmers** (Smart Pill 3.0) | A `light` with on/off and brightness, status read back from the dimmer — a change made at the wall or with a wheel shows up in HA. |
-| **Dimmer settings** | Under *Configuration* on each dimmer's page, stored in the dimmer itself so they hold for a wheel and the wall button too: minimum level, start-up level (a short kick for a cold lamp) and maximum level, read from the dimmer; the push-button input (normal push button or sensor) and the fade-in time. Which ones a device gets follows its product, as in the SG app. |
-| **Minimum level (Home Assistant)** | A second minimum, applied by HA, for loads that stay dark above the 40 % the dimmer's own minimum allows: HA's 1–100 % is spread over what actually lights. |
-| **Dimmer wheels / switches** | An `event` entity (`press`, `hold`, `rotate_up`, `rotate_down` with `steps`) for automations, and a **battery voltage** sensor. |
-| **Direct pairing** | A wheel paired to a dimmer drives it **directly** over the mesh — no gateway, and no Home Assistant in the loop, so it keeps working if HA is down. HA still sees both sides. |
-| **Device management** | Add (provision), pair / unpair, remove (factory reset over the mesh) and back up — all from the integration's **Configure** menu. |
+| **Dimmere** (Smart Pill 3.0) | En `light` med av/på og lysstyrke. Tilstanden leses tilbake fra dimmeren, så en endring fra veggbryteren eller et dimmehjul vises i HA. |
+| **Dimmerinnstillinger** | Under *Konfigurasjon* på enhetssiden. De lagres i selve dimmeren, så de gjelder også for dimmehjul og veggbryter: minimumsnivå, oppstartsnivå (et kort spark for en kald lampe) og maksnivå, lest fra dimmeren, samt trykkbryterinngang (vanlig trykkbryter eller sensor) og innfadingstid. Hvilke innstillinger en enhet får, følger produktet, som i SG-appen. |
+| **Minimumsnivå (Home Assistant)** | Et ekstra minimum som HA legger på, for laster som forblir mørke over de 40 % dimmerens eget minimum tillater. HAs 1–100 % fordeles da over området der lampen faktisk lyser. |
+| **Dimmehjul og brytere** | En `event`-entitet (`press`, `hold`, `rotate_up`, `rotate_down` med `steps`) til automasjoner, og en sensor for **batterispenning**. |
+| **Direkte paring** | Et dimmehjul paret med en dimmer styrer den **direkte** over meshen, uten gateway og uten Home Assistant i mellom. Det virker derfor også når HA er nede. HA ser fortsatt begge sider. |
+| **Enhetsadministrasjon** | Legg til (provisjonering), par / fjern paring, fjern (fabrikkreset over meshen) og ta sikkerhetskopi, alt fra integrasjonens **Konfigurer**-meny. |
 
-### What you need
+### Dette trenger du
 
-- Home Assistant 2025.8 or newer.
-- An **ESPHome Bluetooth proxy** (an ESP32 is enough) or a Bluetooth adapter
-  Home Assistant can use, in range of at least one mains-powered SG device.
-- SG Smart **3.0** devices. The older CSRmesh-based SG Smart generation is a
-  different radio protocol and is not supported (yet).
+- Home Assistant 2025.8 eller nyere.
+- En **ESPHome Bluetooth-proxy** (en ESP32 holder) eller en Bluetooth-adapter Home Assistant kan bruke,
+  innen rekkevidde av minst én SG-enhet med fast strøm.
+- SG Smart **3.0**-enheter. Den eldre CSRmesh-generasjonen støttes av
+  [ha-sg-csrmesh](https://github.com/frekarlsen/ha-sg-csrmesh).
 
-### Installation
+### Installasjon
 
-1. HACS → Integrations → ⋮ → **Custom repositories** → add
-   `https://github.com/frekarlsen/ha-sg-smart-mesh`, category *Integration*.
-   Install **SG Smart 3.0 (Bluetooth Mesh)** and restart Home Assistant.
-2. Add the integration (Settings → Devices & services → Add integration →
-   *Bluetooth Mesh*) and paste a mesh network export (Mesh Configuration
-   Database JSON, e.g. exported from nRF Mesh). It holds your network keys:
-   keep it private.
-3. From then on, everything is in **Settings → Devices & services →
-   Bluetooth Mesh → Configure**.
+1. HACS → Integrasjoner → ⋮ → **Egendefinerte repositorier** → legg til
+   `https://github.com/frekarlsen/ha-sg-smart-mesh`, kategori *Integrasjon*. Installer
+   **SG Smart 3.0 (Bluetooth Mesh)** og start Home Assistant på nytt.
+2. Legg til integrasjonen (Innstillinger → Enheter og tjenester → Legg til integrasjon →
+   *Bluetooth Mesh*) og lim inn en eksport av mesh-nettverket (Mesh Configuration Database JSON,
+   for eksempel eksportert fra nRF Mesh). Den inneholder nettverksnøklene dine, så hold den privat.
+3. Deretter gjøres alt under **Innstillinger → Enheter og tjenester → Bluetooth Mesh → Konfigurer**.
 
-> The integration domain is still `bluetooth_mesh`, so this fork replaces the
-> upstream integration rather than running next to it. Install one or the other.
+> Integrasjonsdomenet er fortsatt `bluetooth_mesh`. Forken erstatter derfor den opprinnelige
+> integrasjonen i stedet for å kjøre ved siden av den. Installer den ene eller den andre.
 
-### The Configure menu
+### Konfigurer-menyen
 
-- **Add a device** — lists factory-reset devices Home Assistant can hear, most
-  recently heard first. Pick one, name it, and keep pressing the device while
-  it is set up (the wheel, or the dimmer's power / R button). HA provisions it,
-  gives it the application key, binds its models and points its publication
-  where it belongs: a dimmer reports to HA, a wheel publishes to all nodes so
-  paired dimmers can act on it. A battery device only announces itself for a
-  moment after it is woken — wake it, then choose *Search again*.
-- **Pair a wheel / switch to a dimmer** — pick both by name and what a short
-  press, a turn and a hold should do. The dimmer stores the pairing. One wheel
-  can drive several dimmers: pair it with each. The dialog lists what is
-  paired already, and the device pages show it too: *Controlled by* on the
-  dimmer, *Controls* on the wheel. That is Home Assistant's record of the
-  pairings it has sent — the dimmers do not answer a read of their own table —
-  so a pairing made in the SG app does not show.
-- **Remove a device** — factory resets the device over the mesh (Config Node
-  Reset, like removing it in the SG app), unpairs a wheel from every dimmer
-  first, and removes it from HA. Its address is never reused, because the other
-  nodes remember its sequence numbers and would drop a newcomer as a replay.
-- **Back up the network** — writes the network (keys, nodes, device keys) to
-  `/config/bluetooth_mesh_backup_<name>.json`. **Keep a copy elsewhere**: without
-  it, every device has to be factory reset if this Home Assistant is lost. It
-  can be imported again with *Reconfigure*.
-- **Connection settings** — the upstream keep-alive / source address options.
+- **Legg til en enhet:** viser fabrikkresatte enheter Home Assistant hører, de sist hørte først. Velg én,
+  gi den et navn, og fortsett å trykke på enheten mens den settes opp (dimmehjulet, eller dimmerens
+  strøm- / R-knapp). HA provisjonerer den, gir den applikasjonsnøkkelen, binder modellene og setter opp
+  hvor den skal publisere: en dimmer rapporterer til HA, et dimmehjul publiserer til alle noder så parede
+  dimmere kan reagere. En batterienhet melder seg bare et øyeblikk etter at den er vekket. Vekk den, og
+  velg så *Søk igjen*.
+- **Par et dimmehjul / en bryter med en dimmer:** velg begge ved navn, og hva et kort trykk, en vridning
+  og et hold skal gjøre. Dimmeren lagrer paringen. Ett dimmehjul kan styre flere dimmere: par det med hver
+  av dem. Dialogen viser hva som allerede er paret, og enhetssidene viser det også: *Styres av* på
+  dimmeren, *Styrer* på dimmehjulet. Dette er Home Assistants oversikt over paringene den har sendt.
+  Dimmerne svarer ikke når man spør om tabellen deres, så en paring gjort i SG-appen vises ikke.
+- **Fjern en enhet:** fabrikkresetter enheten over meshen (Config Node Reset, som når du fjerner den i
+  SG-appen), fjerner først paringen fra alle dimmere hvis det er et dimmehjul, og fjerner den fra HA.
+  Adressen brukes aldri om igjen, fordi de andre nodene husker sekvensnumrene og ellers ville avvist en
+  ny enhet som en gjentakelse.
+- **Ta sikkerhetskopi av nettverket:** skriver nettverket (nøkler, noder, enhetsnøkler) til
+  `/config/bluetooth_mesh_backup_<navn>.json`. **Ta vare på en kopi et annet sted:** uten den må alle
+  enheter fabrikkresettes hvis denne Home Assistant-installasjonen går tapt. Den kan importeres igjen med
+  *Rekonfigurer*.
+- **Tilkoblingsinnstillinger:** de opprinnelige innstillingene for keep-alive og avsenderadresse.
 
-### Actions (for automations and scripts)
+### Handlinger (for automasjoner og skript)
 
-`bluetooth_mesh.pair_switch`, `unpair_switch`, `set_min_level`, plus
-`configure_node`, `get_composition` and `send_raw` for finishing a half-added
-device or reverse-engineering further.
+`bluetooth_mesh.pair_switch`, `unpair_switch`, `set_min_level`, samt `configure_node`, `get_composition`
+og `send_raw` for å fullføre en halvveis lagt til enhet eller for videre kartlegging.
 
-### Known limits
+### Kjente begrensninger
 
-- The dimmer's own minimum goes up to 40 % (as in the SG app). A load that
-  needs more keeps the Home Assistant minimum on top, which a wheel does not
-  see: below it HA shows 1 %.
-- The push-button input and fade-in cannot be read back from the dimmer, so HA
-  shows the value it last wrote (unknown until then).
-- Tested on a LEDDim Smart Pill Micro 3.0 (product `0x00A2`) and SG Smart Wireless 3.0
-  dimmer wheels. Other SG Smart 3.0 devices (tunable white, RGBW, DIN, drivers)
-  speak the same vendor protocol but have not been tried — reports welcome.
-- Scenes stored in SG devices are not exposed; use Home Assistant scenes.
+- Dimmerens eget minimum går opp til 40 % (som i SG-appen). En last som trenger mer, beholder Home
+  Assistant-minimumet i tillegg. Det ser ikke dimmehjulet, og under det viser HA 1 %.
+- Trykkbryterinngang og innfading kan ikke leses tilbake fra dimmeren, så HA viser verdien den sist
+  skrev (ukjent fram til da).
+- Testet på LEDDim Smart Pill Micro 3.0 (produkt `0x00A2`) og SG Smart Wireless 3.0-dimmehjul. Andre
+  SG Smart 3.0-enheter (tunable white, RGBW, DIN, drivere) bruker samme protokoll, men er ikke prøvd.
+  Tilbakemeldinger er velkomne.
+- Scener lagret i SG-enhetene vises ikke. Bruk scener i Home Assistant.
 
-### How it works
+### Slik virker det
 
-SG Smart 3.0 devices are standard Bluetooth SIG Mesh nodes (Telink stack,
-company ID `0x0EE8`) that do almost everything through one vendor model. The
-protocol — power/level, status, switch pairing, button events, device
-settings, product IDs — is documented in
-[docs/sg-smart-3-protocol.md](docs/sg-smart-3-protocol.md). How it was worked
-out (the SG Smart app decompiled with blutter, where each command lives in it,
-and every hardware test, so the work can be repeated on a newer app or
-firmware) is in
-[docs/sg-smart-3-reverse-engineering.md](docs/sg-smart-3-reverse-engineering.md),
-with the first analysis of the app (in Norwegian) in
-[docs/sg-smart-app-report.nb.md](docs/sg-smart-app-report.nb.md). Neither
-contains SG code or binaries.
+SG Smart 3.0-enheter er vanlige Bluetooth SIG Mesh-noder (Telink-stakk, firma-ID `0x0EE8`) som gjør nesten
+alt gjennom én egen leverandørmodell. Protokollen (av/på og nivå, status, bryterparing, knappehendelser,
+enhetsinnstillinger, produkt-ID-er) er dokumentert i
+[docs/sg-smart-3-protocol.md](docs/sg-smart-3-protocol.md). Hvordan den ble kartlagt (SG Smart-appen
+dekompilert med blutter, hvor hver kommando ligger i den, og hver maskinvaretest, slik at arbeidet kan
+gjentas på en nyere app eller fastvare) står i
+[docs/sg-smart-3-reverse-engineering.md](docs/sg-smart-3-reverse-engineering.md), med den første analysen
+av appen i [docs/sg-smart-app-report.nb.md](docs/sg-smart-app-report.nb.md). Ingen av dem inneholder
+SG-kode eller binærfiler.
 
-A notable fix on the way, which also applies upstream: proxy configuration
-messages (the proxy filter) must be encrypted with the **proxy nonce**
-(Mesh Profile §3.8.5.4), not the network nonce. Häfele lamps tolerate the
-wrong one; SG nodes silently reject it, and then forward nothing back.
+En viktig rettelse underveis, som også gjelder det opprinnelige prosjektet: konfigurasjonsmeldinger til
+proxyen (proxyfilteret) må krypteres med **proxy-nonce** (Mesh Profile §3.8.5.4), ikke nettverks-nonce.
+Häfele-lamper tåler feil nonce. SG-noder avviser den uten å si fra, og sender da ingenting tilbake.
 
 ---
 
-*The rest of this README is the upstream documentation of the generic
-Bluetooth Mesh integration, which this fork keeps.*
+*Resten av denne README-en er dokumentasjonen fra det opprinnelige prosjektet for den generelle
+Bluetooth Mesh-integrasjonen, som forken beholder.*
 
-## Upstream: will this work for me?
+## Opprinnelig prosjekt: virker dette for meg?
 
-**Your lights.** Bluetooth Mesh luminaires: Häfele Connect Mesh and Loox,
-ThingOS-based lights sold under other names, and standard SIG-Mesh nodes. If
-the lamp was set up from a phone app over Bluetooth and there is no hub in the
-box, it is likely one of these.
+**Lampene dine.** Bluetooth Mesh-armaturer: Häfele Connect Mesh og Loox, ThingOS-baserte lamper solgt
+under andre navn, og vanlige SIG Mesh-noder. Hvis lampen ble satt opp fra en mobilapp over Bluetooth og
+det ikke fulgte med noen hub, er den trolig en av disse.
 
-**What you need.** An ESPHome Bluetooth proxy within range of the lights, or a
-Bluetooth adapter on the Home Assistant machine — whichever you already have.
-Nothing else to buy.
+**Dette trenger du.** En ESPHome Bluetooth-proxy innen rekkevidde av lampene, eller en Bluetooth-adapter
+på Home Assistant-maskinen, det du allerede har. Ingenting annet å kjøpe.
 
-**Colour is not supported yet.** On/off, brightness and warm-to-cool white all
-work. Full-colour RGB lamps do not: the author's own lights are tunable-white,
-and rather than ship colour untested, it is left out. If you have colour
-hardware and want to help, that is exactly what is missing.
+**Farger støttes ikke ennå.** Av/på, lysstyrke og varm til kald hvit virker. Fullfarge RGB-lamper gjør
+det ikke: forfatterens egne lamper er tunable white, og i stedet for å levere farger uten testing er de
+utelatt. Har du fargelamper og vil hjelpe, er det akkurat det som mangler.
 
-**You can keep using the vendor app.** The integration joins your existing mesh
-rather than replacing it, so the app and Home Assistant coexist — see
-[Coexistence with the vendor app](#coexistence-with-the-vendor-app-shared-keys).
+**Du kan fortsette å bruke leverandørens app.** Integrasjonen blir med i det eksisterende meshet ditt i
+stedet for å erstatte det, så appen og Home Assistant kan brukes side om side. Se
+[Sameksistens med leverandørens app](#sameksistens-med-leverandørens-app-delte-nøkler).
 
-**What Home Assistant shows is what the lamp says.** Brightness and colour
-temperature are read back from the light itself, not assumed from the last
-command — so changing a lamp from the app is reflected here.
+**Det Home Assistant viser, er det lampen sier.** Lysstyrke og fargetemperatur leses tilbake fra selve
+lampen, ikke antatt ut fra siste kommando. En endring fra appen vises derfor her.
 
-## What it controls
+## Hva den styrer
 
-Each lighting output becomes one Home Assistant `light` entity, with
-capabilities read from its mesh composition:
+Hver lysutgang blir én `light`-entitet i Home Assistant, med egenskaper lest fra mesh-sammensetningen:
 
-| Node model | HA capability |
+| Nodemodell | Egenskap i HA |
 | --- | --- |
-| Generic OnOff (`0x1000`) | on / off |
-| Light Lightness (`0x1300`) | + brightness |
-| Light CTL (`0x1303` / `0x1306`) | + colour temperature (tunable white) |
+| Generic OnOff (`0x1000`) | av / på |
+| Light Lightness (`0x1300`) | + lysstyrke |
+| Light CTL (`0x1303` / `0x1306`) | + fargetemperatur (tunable white) |
 
-A lamp is one output, so it is one entity. A **multi-channel controller** is
-one mesh node whose channels are its elements, each carrying its own dimmer,
-and each of those becomes its own entity, named after the output as the vendor
-app names it, all grouped under the one device. A lamp that merely spreads its
-models over several elements stays one entity.
+En lampe er én utgang, og dermed én entitet. En **flerkanals kontroller** er én mesh-node der kanalene er
+elementene, hver med sin egen dimmer. Hver av dem blir en egen entitet, navngitt etter utgangen slik
+leverandørappen navngir den, samlet under én enhet. En lampe som bare sprer modellene sine over flere
+elementer, forblir én entitet.
 
-**Not yet supported:** RGB / full-colour lamps (Light HSL / xyL). The author's
-hardware is tunable-white only, so colour is left unimplemented rather than
-shipped untested — contributions with colour hardware to validate against are
-welcome.
+**Ikke støttet ennå:** RGB- og fullfargelamper (Light HSL / xyL). Forfatterens maskinvare er bare tunable
+white, så farger er utelatt i stedet for levert uten testing. Bidrag fra noen med fargelamper å teste
+mot er velkomne.
 
-### State is read, not assumed
+### Tilstanden leses, den antas ikke
 
-A Bluetooth Mesh proxy starts every connection forwarding *nothing* inbound
-until the client configures its address filter — which is why early versions
-never saw a single reply and could only display what they had last commanded.
-The integration configures that filter, so:
+En Bluetooth Mesh-proxy videresender *ingenting* inn på en ny tilkobling før klienten har satt opp
+adressefilteret sitt. Derfor så de første versjonene aldri et eneste svar og kunne bare vise det de sist
+hadde sendt. Integrasjonen setter opp filteret, så:
 
-* on/off and brightness are **read from the lamp** when the mesh becomes
-  reachable, and again after every reconnection — including changes you made
-  from the vendor app while Home Assistant was away;
-* a light whose state has not been read yet reports `unknown` rather than
-  guessing `off` — an invented state is one another integration can act on and
-  make true;
-* colour temperature is read back too, and the lamp is asked once for the
-  Kelvin range it actually tracks — so the slider offers that lamp's real
-  extremes instead of a conventional 2700–6500 guess;
-* a command shows at once, then settles on what the lamp **answered**. A lamp
-  that answers nothing leaves the entity as it was, and the log says so once
-  per such episode — a node that keeps answering reads while dropping writes
-  is otherwise invisible from the dashboard, which would keep asserting the
-  state it asked for.
+* av/på og lysstyrke **leses fra lampen** når meshet blir tilgjengelig, og igjen etter hver ny
+  tilkobling, også endringer gjort fra leverandørappen mens Home Assistant var borte;
+* en lampe som ikke er lest ennå, viser `unknown` i stedet for å gjette `off`. En oppdiktet tilstand kan
+  en annen integrasjon handle på og gjøre sann;
+* fargetemperatur leses også tilbake, og lampen spørres én gang om Kelvin-området den faktisk følger. Da
+  viser glidebryteren lampens egne ytterpunkter i stedet for en antatt 2700–6500;
+* en kommando vises med en gang, og ender så på det lampen **svarte**. En lampe som ikke svarer, lar
+  entiteten stå som den var, og loggen sier fra én gang per tilfelle. En node som svarer på lesing men
+  dropper skriving, er ellers usynlig fra dashbordet, som ville fortsatt å vise tilstanden det ba om.
 
-Some lamps map colour temperature the wrong way round: they glow warm white when
-Home Assistant says cool. Tick those under **Lamps with inverted colour
-temperature** (Settings → Devices & Services → *Bluetooth Mesh* → **Configure**)
-and their requested temperature is mirrored before being sent. Leave the others
-alone — mirroring a lamp that is already correct inverts warm and cool end to
-end. It is a per-lamp setting rather than a per-manufacturer one because the
-quirk varies between models and firmware of the same brand.
+Noen lamper har fargetemperaturen snudd: de lyser varmt hvitt når Home Assistant sier kaldt. Huk av for
+dem under **Lamper med invertert fargetemperatur** (Innstillinger → Enheter og tjenester →
+*Bluetooth Mesh* → **Konfigurer**), så speiles ønsket temperatur før den sendes. La de andre være:
+speiler du en lampe som allerede er riktig, byttes varmt og kaldt helt om. Det er en innstilling per
+lampe og ikke per produsent, fordi feilen varierer mellom modeller og fastvare fra samme merke.
 
-The mirror applies when a command is sent, so a change takes effect from the
-next one: ticking or unticking the box does not re-colour a lamp that is already
-lit. It reflects around the range the lamp reports, so a lamp whose limits are
-not the conventional 2700–6500 is mirrored around its own midpoint rather than
-an assumed one.
+Speilingen gjelder når en kommando sendes, så en endring virker fra neste kommando: å huke av eller på
+fargelegger ikke om en lampe som allerede lyser. Den speiler rundt området lampen oppgir, så en lampe med
+andre grenser enn 2700–6500 speiles rundt sitt eget midtpunkt.
 
-Adding a node, or refreshing a key, is a **Reconfigure** on the existing entry:
-paste the new export and keep every entity id and its history. If something is
-not working, **Download diagnostics** on the integration reports the Network ID
-it looks for, every mesh proxy Home Assistant currently sees, the IV Index and
-sequence cursor in use, the unicast address commands are sent from, which
-application key they are encrypted with next to the ones each model is bound
-to, and each node's composition — with no key material in it, so it is safe to
-paste into an issue. That last group matters because a mismatch there is
-invisible on air: a node discards a message it cannot authenticate without
-answering, so the integration transmits perfectly and the lamp does nothing.
+Å legge til en node, eller fornye en nøkkel, gjøres med **Rekonfigurer** på den eksisterende oppføringen:
+lim inn den nye eksporten, og alle entitets-ID-er og historikk beholdes. Virker noe ikke, rapporterer
+**Last ned diagnostikk** på integrasjonen hvilken Network ID den ser etter, alle mesh-proxyer Home
+Assistant ser nå, IV Index og sekvensteller i bruk, unicast-adressen kommandoer sendes fra, hvilken
+applikasjonsnøkkel de krypteres med ved siden av dem hver modell er bundet til, og hver nodes
+sammensetning. Den inneholder ingen nøkler, så den er trygg å lime inn i en sak. Den siste gruppen er
+viktig fordi en feil der ikke synes i lufta: en node forkaster en melding den ikke kan autentisere, uten å
+svare, så integrasjonen sender helt riktig og lampen gjør ingenting.
 
-The dump also **probes each node under its device key** (a `Config Relay Get`,
-whose request and reply both fit in one unsegmented message). Its `answered`
-field is the honest reachability signal — it needs no application key, no model
-binding and no vendor support, so it separates *the message never arrived* from
-*the node received it and did nothing*, which is the single hardest thing to
-tell apart on a mesh. The `relay` block beside it says whether that node
-forwards anything from the proxy connection into the rest of the network.
+Diagnostikken **tester også hver node med enhetsnøkkelen** (en `Config Relay Get`, der både spørsmål og
+svar får plass i én usegmentert melding). Feltet `answered` er det ærlige signalet på om noden nås: det
+krever ingen applikasjonsnøkkel, ingen modellbinding og ingen leverandørstøtte, så det skiller *meldingen
+kom aldri fram* fra *noden fikk den og gjorde ingenting*, som er det aller vanskeligste å skille i et mesh.
+Blokken `relay` ved siden av viser om noden videresender noe fra proxytilkoblingen ut i resten av
+nettverket.
 
-## Two deliverables
+## To leveranser
 
-This repository ships two things, mirroring the `pymadoka-ng` / `daikin_madoka`
-split:
+Repoet inneholder to ting, etter samme mønster som `pymadoka-ng` / `daikin_madoka`:
 
-1. **`btmesh`** (`src/btmesh/`) — a Home-Assistant-independent Python library
-   implementing the mesh stack: crypto (k1–k4 derivations, AES-CMAC, AES-CCM,
-   network obfuscation), network/transport/access layers, proxy-PDU
-   segmentation/reassembly, a provisioner, and a GATT bearer that runs over
-   `bleak` / `habluetooth` (so it works through ESPHome Bluetooth proxies).
-2. **`bluetooth_mesh`** (`custom_components/bluetooth_mesh/`) — a HACS custom
-   integration: config flow, storage, a connection coordinator, and Home
-   Assistant entities (starting with `light`).
+1. **`btmesh`** (`src/btmesh/`): et Python-bibliotek uavhengig av Home Assistant som implementerer
+   mesh-stakken: krypto (k1–k4-avledninger, AES-CMAC, AES-CCM, nettverksobfuskering),
+   nettverks-, transport- og aksesslag, segmentering og sammensetting av proxy-PDU-er, en provisjonerer,
+   og en GATT-bærer over `bleak` / `habluetooth` (så den virker gjennom ESPHome Bluetooth-proxyer).
+2. **`bluetooth_mesh`** (`custom_components/bluetooth_mesh/`): en HACS-integrasjon med oppsettsdialog,
+   lagring, en tilkoblingskoordinator og Home Assistant-entiteter (først `light`).
 
-## How it works
+## Slik henger det sammen
 
 ```
-Home Assistant (pure-Python mesh stack: btmesh)
+Home Assistant (mesh-stakk i ren Python: btmesh)
   │  bleak / habluetooth
   ▼
-ESPHome BLE proxy (existing fleet)          ← or any local BT adapter
-  │  GATT: Mesh Proxy Service (proxy protocol tunnel)
+ESPHome BLE-proxy (de du allerede har)      ← eller en lokal Bluetooth-adapter
+  │  GATT: Mesh Proxy Service (proxyprotokoll-tunnel)
   ▼
-A mesh node with GATT Proxy enabled (any powered lamp)
-  │  advertising bearer (mesh relay)
+En mesh-node med GATT Proxy aktivert (en hvilken som helst lampe med strøm)
+  │  annonseringsbærer (mesh-videresending)
   ▼
-The rest of the mesh network
+Resten av mesh-nettverket
 ```
 
-One GATT connection serves the whole network: the stack maintains a single
-tunnel to one proxy node, and the mesh relays messages to every other node.
-No BlueZ meshd, no dedicated ESP32 firmware — it works on Home Assistant OS in
-a VM with no local radio.
+Én GATT-tilkobling betjener hele nettverket: stakken holder én tunnel til én proxynode, og meshet
+videresender meldingene til alle de andre nodene. Ingen BlueZ meshd og ingen egen ESP32-fastvare. Det
+virker på Home Assistant OS i en VM uten egen radio.
 
-## Coexistence with the vendor app (shared keys)
+## Sameksistens med leverandørens app (delte nøkler)
 
-Rather than replicating a vendor's proprietary activation step, this project
-**rides on the mesh network the vendor app already created**. The app exports
-its network as a `.connect` JSON (ThingOS format) containing the NetKey, the
-AppKey, and each node's unicast address. The integration imports that file,
-connects its proxy to the same network, and sends **standard**, app-keyed mesh
-messages (Generic OnOff Set, Light Lightness Set, …) to each node's unicast
-address.
+I stedet for å etterligne leverandørens egen aktiveringsprosess **bruker prosjektet mesh-nettverket
+leverandørappen allerede har laget**. Appen eksporterer nettverket som en `.connect`-JSON (ThingOS-format)
+med NetKey, AppKey og hver nodes unicast-adresse. Integrasjonen importerer filen, kobler proxyen sin til
+samme nettverk og sender **standard** mesh-meldinger med applikasjonsnøkkelen (Generic OnOff Set, Light
+Lightness Set, …) til hver nodes unicast-adresse.
 
-Because both sides share the same keys, the vendor app and Home Assistant can
-control the **same lamps** — HA drives the same lights the app provisioned.
+Fordi begge bruker de samme nøklene, kan leverandørappen og Home Assistant styre **de samme lampene**.
 
-A mesh node has a **single** GATT-proxy connection slot, so Home Assistant and
-the app cannot both hold it at once. The integration keeps its proxy connection
-open by default (so commands are instant), which means the vendor app cannot
-connect while HA is loaded. If you still want to use the app, set a **keep-alive
-timeout** (Settings → Devices & Services → *Bluetooth Mesh* → **Configure**):
-after that many idle seconds HA releases the lamp so the app can take over, at
-the cost of a few-second reconnect on HA's next command. `0` = always
-connected.
+En mesh-node har **én** plass for GATT-proxytilkobling, så Home Assistant og appen kan ikke ha den
+samtidig. Integrasjonen holder proxytilkoblingen åpen som standard (så kommandoer går umiddelbart), og
+da kan ikke leverandørappen koble til mens HA kjører. Vil du fortsatt bruke appen, kan du sette en
+**keep-alive-tidsavbrudd** (Innstillinger → Enheter og tjenester → *Bluetooth Mesh* → **Konfigurer**):
+etter så mange sekunder uten aktivitet slipper HA lampen så appen kan ta over, mot at HAs neste kommando
+må koble til på nytt i noen sekunder. `0` = alltid tilkoblet.
 
-## Installation
+## Installasjon (opprinnelig prosjekt)
 
-1. **Add the repository to HACS** as a custom repository
-   (HACS → Integrations → ⋯ → Custom repositories), category **Integration**,
-   then install *Bluetooth Mesh* and restart Home Assistant.
-2. **Export your network** from the vendor app as a `.connect` file.
-3. **Add the integration** (Settings → Devices & Services → Add Integration →
-   *Bluetooth Mesh*) and paste the contents of the `.connect` file when
-   prompted. Keep this file private — it contains your mesh network keys and
-   should never be committed to a repository.
-4. *(Optional)* **Configure** the keep-alive timeout if you want to keep using
-   the vendor app — see [Coexistence](#coexistence-with-the-vendor-app-shared-keys).
+1. **Legg til repoet i HACS** som egendefinert repositorium (HACS → Integrasjoner → ⋯ → Egendefinerte
+   repositorier), kategori **Integrasjon**, installer *Bluetooth Mesh* og start Home Assistant på nytt.
+2. **Eksporter nettverket** fra leverandørappen som en `.connect`-fil.
+3. **Legg til integrasjonen** (Innstillinger → Enheter og tjenester → Legg til integrasjon →
+   *Bluetooth Mesh*) og lim inn innholdet i `.connect`-filen når du blir spurt. Hold filen privat: den
+   inneholder nøklene til mesh-nettverket og skal aldri legges i et repo.
+4. *(Valgfritt)* **Konfigurer** keep-alive-tidsavbruddet hvis du vil fortsette å bruke leverandørappen.
+   Se [Sameksistens](#sameksistens-med-leverandørens-app-delte-nøkler).
 
-A Bluetooth transport is required: an ESPHome Bluetooth proxy on your network,
-or a local Bluetooth adapter usable by Home Assistant. At least one mesh lamp
-must be powered and in range of that proxy for Home Assistant to reach the
-network.
+Du trenger en Bluetooth-transport: en ESPHome Bluetooth-proxy i nettverket, eller en lokal
+Bluetooth-adapter Home Assistant kan bruke. Minst én mesh-lampe må ha strøm og være innen rekkevidde av
+proxyen for at Home Assistant skal nå nettverket.
 
-## Development
+## Utvikling
 
 ```bash
-# Library only (fast; no Home Assistant):
+# Bare biblioteket (raskt, uten Home Assistant):
 uv sync
-uv run pytest                  # btmesh library + phase0 harness suites
+uv run pytest                  # btmesh-biblioteket + phase0-testene
 
-# Full suite (library + HA integration) in a HA-equipped environment:
+# Hele testsuiten (bibliotek + HA-integrasjon) i et miljø med Home Assistant:
 pip install -e .
 pip install -r requirements-test.txt
-pytest                         # everything: library, phase0, tests/ha
+pytest                         # alt: bibliotek, phase0, tests/ha
 
-# Lint (CI pins this exact version):
+# Lint (CI låser akkurat denne versjonen):
 pip install ruff==0.16.0
 ruff check .
 ```
 
-Run `pytest` with no path argument: `testpaths` in `pyproject.toml` covers the
-library tests, `tests/ha/`, and the `phase0/` harness suite. Running a single
-file from `tests/ha/` is not a shortcut — `test_init.py` and `test_diagnostics.py`
-import `custom_components` and reach for the Bluetooth manager lazily, inside the
-test bodies, and rely on an earlier file in the session having done so at module
-scope. On their own they fail with `ModuleNotFoundError` or `RuntimeError:
-BluetoothManager has not been set`, which looks like a broken checkout. Re-run
-the whole suite before believing a single file's red. The `tests/ha/`
-tree is guarded with `pytest.importorskip`, so it stays skipped when Home
-Assistant is not installed and runs for real when it is. CI installs Home
-Assistant and runs the combined suite on Linux; see
-`.github/workflows/tests.yml` (ruff + pytest) and
-`.github/workflows/validate.yml` (hassfest + HACS).
+Kjør `pytest` uten sti: `testpaths` i `pyproject.toml` dekker bibliotektestene, `tests/ha/` og
+`phase0/`-testene. Å kjøre én fil fra `tests/ha/` er ingen snarvei: `test_init.py` og
+`test_diagnostics.py` importerer `custom_components` og henter Bluetooth-manageren først inne i testene,
+og forutsetter at en tidligere fil i samme kjøring har gjort det på modulnivå. Alene feiler de med
+`ModuleNotFoundError` eller `RuntimeError: BluetoothManager has not been set`, som ser ut som en ødelagt
+utsjekk. Kjør hele suiten før du tror på at én fil feiler. `tests/ha/` er beskyttet med
+`pytest.importorskip`, så de hoppes over når Home Assistant ikke er installert og kjøres når den er det.
+CI installerer Home Assistant og kjører hele suiten på Linux. Se `.github/workflows/tests.yml`
+(ruff + pytest) og `.github/workflows/validate.yml` (hassfest + HACS).
 
-> On Windows, `tests/ha/conftest.py` neutralises `pytest-socket` because the
-> event loop's self-pipe needs a socket there. A test that reaches the network
-> — one that triggers a real config-entry reload, say — will therefore pass
-> locally and fail on Linux CI. That is CI doing its job, not a flake.
+> På Windows slår `tests/ha/conftest.py` av `pytest-socket`, fordi hendelsesløkka trenger en socket der.
+> En test som når nettverket, for eksempel en som utløser en ekte omlasting av en oppføring, vil derfor
+> passere lokalt og feile i CI på Linux. Det er CI som gjør jobben sin, ikke en tilfeldig feil.
 
-### Releasing
+### Utgivelser
 
-`docs/release-flow.md` describes how a change reaches a published release:
-branch, PR, both CI workflows, a hardware-validated release candidate, then the
-tag. It also carries the rules that came out of getting it wrong — re-reading
-the remote before tagging, and keeping `Closes #N` out of merge bodies when the
-issue is waiting on a reporter's confirmation.
+`docs/release-flow.md` beskriver hvordan en endring blir en publisert utgivelse: gren, PR, begge
+CI-arbeidsflytene, en release candidate testet på maskinvare, og så taggen. Den har også reglene som kom
+av å gjøre det feil: les remote på nytt rett før tagging, og hold `Closes #N` unna merge-teksten når saken
+venter på bekreftelse fra den som meldte den.
 
-### Vendored library
+### Innebygd bibliotek
 
-`src/btmesh/` is the canonical library (the source of truth, published to PyPI).
-Because HACS installs `custom_components/bluetooth_mesh/` as-is, the integration
-ships a **vendored copy** of the library at
-`custom_components/bluetooth_mesh/btmesh/`, so it installs with no external
-`btmesh` dependency (only `cryptography`, which Home Assistant already provides).
-After changing anything under `src/btmesh/`, re-sync the vendored copy:
+`src/btmesh/` er det kanoniske biblioteket (sannhetskilden, publisert på PyPI). Fordi HACS installerer
+`custom_components/bluetooth_mesh/` som den er, har integrasjonen en **innebygd kopi** av biblioteket i
+`custom_components/bluetooth_mesh/btmesh/`, så den installeres uten ekstern `btmesh`-avhengighet (bare
+`cryptography`, som Home Assistant allerede har). Etter en endring under `src/btmesh/` må den innebygde
+kopien synkroniseres:
 
 ```bash
 python scripts/sync_vendored_btmesh.py
 ```
 
-CI runs `python scripts/sync_vendored_btmesh.py --check` and fails on drift.
-It has to: each tree is imported by a different half of the test suite, so a
-forgotten re-sync breaks no test and would ship a stale stack to HACS users on
-a green build.
+CI kjører `python scripts/sync_vendored_btmesh.py --check` og feiler ved avvik. Det må den: hvert tre
+importeres av hver sin halvdel av testsuiten, så en glemt synkronisering knekker ingen test og ville gitt
+HACS-brukere en utdatert stakk på et grønt bygg.
 
-## Documentation
+## Dokumentasjon
 
-Design and feasibility write-ups live in [`docs/plans/`](docs/plans/):
+Design og mulighetsstudier ligger i [`docs/plans/`](docs/plans/):
 
-- [`2026-07-18-btmesh-design.md`](docs/plans/2026-07-18-btmesh-design.md) —
-  design document (problem, architecture, key decisions).
-- [`2026-07-18-phase0-feasibility.md`](docs/plans/2026-07-18-phase0-feasibility.md) —
-  Phase 0 feasibility plan.
-- [`2026-07-19-phase0-report.md`](docs/plans/2026-07-19-phase0-report.md) —
-  Phase 0 report (the hardware-validated breakthrough).
-- [`2026-07-19-phase1-library-and-ha-integration.md`](docs/plans/2026-07-19-phase1-library-and-ha-integration.md) —
-  Phase 1 plan (library + HA integration).
+- [`2026-07-18-btmesh-design.md`](docs/plans/2026-07-18-btmesh-design.md): designdokument (problem,
+  arkitektur, viktige valg).
+- [`2026-07-18-phase0-feasibility.md`](docs/plans/2026-07-18-phase0-feasibility.md): plan for fase 0
+  (mulighetsstudie).
+- [`2026-07-19-phase0-report.md`](docs/plans/2026-07-19-phase0-report.md): rapport fra fase 0
+  (gjennombruddet, verifisert på maskinvare).
+- [`2026-07-19-phase1-library-and-ha-integration.md`](docs/plans/2026-07-19-phase1-library-and-ha-integration.md):
+  plan for fase 1 (bibliotek + HA-integrasjon).
 
-## Credit and honesty
+## Kreditering og ærlighet
 
-This project grew out of reverse-engineering a Häfele Connect Mesh setup after
-its vendor gateway was discontinued. The mesh crypto and codec layers are
-implemented from the public Bluetooth SIG Mesh specification and validated
-against the specification's official sample vectors; the coexistence approach
-was discovered empirically against real hardware. It is an independent,
-unofficial project and is not affiliated with or endorsed by Häfele, ThingOS,
-or the Bluetooth SIG.
+Prosjektet vokste ut av kartleggingen av et Häfele Connect Mesh-anlegg etter at leverandørens gateway ble
+lagt ned. Krypto- og kodeklagene i meshet er implementert fra den offentlige Bluetooth SIG
+Mesh-spesifikasjonen og kontrollert mot spesifikasjonens offisielle testvektorer. Sameksistensløsningen
+ble funnet ved forsøk på ekte maskinvare. Det er et uavhengig, uoffisielt prosjekt og ikke tilknyttet
+eller godkjent av Häfele, ThingOS eller Bluetooth SIG.
 
-## Support
+## Støtte
 
-Open an issue here for anything about this integration — a bug, a question, or a
-feature request. Forum threads are for general discussion and user-to-user help;
-nothing raised there is tracked, and it can be lost. An issue cannot.
+Opprett en sak (issue) her for alt som gjelder integrasjonen: feil, spørsmål eller ønsker. Forumtråder er
+for generell diskusjon og hjelp mellom brukere. Det som tas opp der, følges ikke opp og kan bli borte. En
+sak blir ikke det.
 
-Before you open one, read [Credit and honesty](#credit-and-honesty): this is a
-reverse-engineered stack, and it says plainly what is validated against the
-specification and what was found empirically against real hardware.
+Les [Kreditering og ærlighet](#kreditering-og-ærlighet) før du oppretter en: dette er en kartlagt stakk,
+og der står det tydelig hva som er kontrollert mot spesifikasjonen og hva som er funnet ved forsøk på
+ekte maskinvare.
 
-To get a useful answer on the first exchange, include:
+For å få et nyttig svar med en gang, ta med:
 
-- your Home Assistant version and the version of this integration;
-- the nodes involved — brand, model, and whether they were ever provisioned by a
-  vendor app — and the ESPHome proxies used, with board and ESPHome version;
-- the diagnostics download (Settings → Devices & services → Bluetooth Mesh →
-  **⋮** → *Download diagnostics*);
-- a debug log, plus what you did, what you expected, and what happened instead.
+- Home Assistant-versjonen og versjonen av denne integrasjonen;
+- nodene det gjelder (merke, modell, og om de noen gang er provisjonert av en leverandørapp) og
+  ESPHome-proxyene som brukes, med kort og ESPHome-versjon;
+- diagnostikkfilen (Innstillinger → Enheter og tjenester → Bluetooth Mesh → **⋮** → *Last ned
+  diagnostikk*);
+- en debug-logg, og hva du gjorde, hva du forventet og hva som skjedde i stedet.
 
-### Staying informed
+### Hold deg oppdatert
 
-New versions are announced here first. A short note may follow in the forum
-thread, but this page is the only complete record. To hear about one:
+Nye versjoner kunngjøres her først. En kort melding kan komme i forumtråden etterpå, men denne siden er
+den eneste fullstendige oversikten. Slik får du beskjed:
 
-- **HACS already offers you the update**, release notes included — nothing to do;
-- subscribe to `https://github.com/frekarlsen/ha-sg-smart-mesh/releases.atom` in
-  any RSS reader, or inside Home Assistant through the `feedreader` integration;
-- or use **Watch → Custom → Releases** on this repository.
+- **HACS tilbyr deg oppdateringen allerede**, med utgivelsesnotater. Du trenger ikke gjøre noe;
+- abonner på `https://github.com/frekarlsen/ha-sg-smart-mesh/releases.atom` i en RSS-leser, eller i Home
+  Assistant med `feedreader`-integrasjonen;
+- eller bruk **Watch → Custom → Releases** på dette repoet.
 
-## License
+## Lisens
 
-[MIT](LICENSE) © 2026 David Simon (upstream), © 2026 Fredrik Karlsen (SG Smart 3.0 additions).
+[MIT](LICENSE) © 2026 David Simon (opprinnelig prosjekt), © 2026 Fredrik Karlsen (tillegg for SG Smart 3.0).
